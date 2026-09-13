@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seo-geo-aeo-engine"
+version = "0.3.0"
+description = "Consolidated SEO/GEO/AEO audit engine with Supabase-backed prospect and delta tracking"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "supabase>=2.6",
+    "python-dotenv>=1.0",
+    "reportlab>=4.2",
+    "playwright>=1.47",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-httpx>=0.30", "mypy>=1.10", "ruff>=0.6"]
+
+[project.scripts]
+seo-geo-aeo = "seo_geo_aeo.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

@@ -1,0 +1,172 @@
+"""Shared scoring primitives.
+
+Every dimension module (seo_technical, geo_crawlers, geo_citability, ...)
+returns a `DimensionScore`. The `CompositeScorer` combines them with the
+weights defined by whichever report profile is active (SEO / GEO / AEO have
+different weightings per the source rubrics).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class Severity(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+@dataclass
+class Finding:
+    severity: Severity
+    title: str
+    detail: str
+    page_url: str | None = None
+
+
+@dataclass
+class DimensionScore:
+    """Result of one scoring module (e.g. 'ai_citability', 'schema')."""
+
+    dimension: str
+    score: float  # 0-100
+    findings: list[Finding] = field(default_factory=list)
+    raw: dict = field(default_factory=dict)  # module-specific debug data
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.score <= 100:
+            raise ValueError(f"{self.dimension} score {self.score} out of range 0-100")
+
+
+@dataclass
+class CompositeResult:
+    profile: str
+    overall_score: float
+    dimension_scores: dict[str, DimensionScore]
+    weights: dict[str, float]
+
+    @property
+    def findings(self) -> list[Finding]:
+        all_findings: list[Finding] = []
+        for dim in self.dimension_scores.values():
+            all_findings.extend(dim.findings)
+        order = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
+        return sorted(all_findings, key=lambda f: order[f.severity])
+
+    def rating(self) -> str:
+        return rating_for_score(self.overall_score)
+
+
+def rating_for_score(score: float) -> str:
+    if score >= 90:
+        return "Excellent"
+    if score >= 75:
+        return "Good"
+    if score >= 60:
+        return "Fair"
+    if score >= 40:
+        return "Poor"
+    return "Critical"
+
+
+# Weight profiles ported from the source rubrics (geo-audit, aeo-audit,
+# geo-report SKILL.md files). Keys must match DimensionScore.dimension names
+# produced by the registered modules.
+PROFILE_WEIGHTS: dict[str, dict[str, float]] = {
+    "geo": {
+        "ai_citability": 0.25,
+        "brand_authority": 0.20,
+        "content_eeat": 0.20,
+        "technical_geo": 0.15,
+        "schema": 0.10,
+        "platform_optimization": 0.10,
+    },
+    "seo": {
+        "technical_seo": 0.35,
+        "on_page": 0.25,
+        "content_quality": 0.25,
+        "schema": 0.15,
+    },
+    "aeo": {
+        "live_citation": 0.15,
+        "ai_citability": 0.20,
+        "brand_authority": 0.20,
+        "content_eeat": 0.20,
+        "technical_geo": 0.15,
+        "schema": 0.10,
+    },
+}
+
+
+def aggregate_dimension_scores(dimension: str, page_scores: list[DimensionScore]) -> DimensionScore:
+    """Combine one dimension's per-page scores into a single site-level score.
+
+    Score is the mean across pages. Findings are deduplicated by title (a
+    "No H1 found" on 15 pages becomes one finding noting the count) and
+    capped so a large crawl doesn't produce an unreadable report.
+    """
+    if not page_scores:
+        raise ValueError(f"Cannot aggregate zero page scores for dimension {dimension!r}")
+
+    mean_score = sum(ds.score for ds in page_scores) / len(page_scores)
+
+    findings_by_title: dict[str, list[Finding]] = {}
+    for ds in page_scores:
+        for f in ds.findings:
+            findings_by_title.setdefault(f.title, []).append(f)
+
+    order = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
+    aggregated_findings: list[Finding] = []
+    for title, occurrences in sorted(findings_by_title.items(), key=lambda kv: order[kv[1][0].severity]):
+        sample = occurrences[0]
+        count = len(occurrences)
+        detail = sample.detail if count == 1 else f"{sample.detail} (found on {count} pages)"
+        aggregated_findings.append(
+            Finding(severity=sample.severity, title=title, detail=detail, page_url=sample.page_url)
+        )
+
+    return DimensionScore(
+        dimension=dimension,
+        score=round(mean_score, 1),
+        findings=aggregated_findings,
+        raw={"pages_scored": len(page_scores), "per_page_scores": [ds.score for ds in page_scores]},
+    )
+
+
+class CompositeScorer:
+    """Combines DimensionScore results into a weighted CompositeResult.
+
+    Missing dimensions (a module that wasn't run) are excluded and the
+    remaining weights are renormalized, so a partial run still produces a
+    meaningful score instead of silently treating "not run" as zero.
+    """
+
+    def __init__(self, profile: str, weights: dict[str, float] | None = None) -> None:
+        if profile not in PROFILE_WEIGHTS and weights is None:
+            raise ValueError(
+                f"Unknown profile {profile!r}; pass explicit weights or use one of "
+                f"{sorted(PROFILE_WEIGHTS)}"
+            )
+        self.profile = profile
+        self.weights = weights or PROFILE_WEIGHTS[profile]
+
+    def combine(self, dimension_scores: dict[str, DimensionScore]) -> CompositeResult:
+        applicable = {k: v for k, v in self.weights.items() if k in dimension_scores}
+        if not applicable:
+            raise ValueError(
+                f"None of the scored dimensions {list(dimension_scores)} match profile "
+                f"{self.profile!r} weights {list(self.weights)}"
+            )
+        weight_sum = sum(applicable.values())
+        overall = sum(
+            dimension_scores[dim].score * (weight / weight_sum) for dim, weight in applicable.items()
+        )
+        return CompositeResult(
+            profile=self.profile,
+            overall_score=round(overall, 1),
+            dimension_scores=dimension_scores,
+            weights=applicable,
+        )
