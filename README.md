@@ -140,6 +140,12 @@ seo-geo-aeo audit https://example.com --profile geo --brand-name "Example Co"
 # Markdown + PDF output
 seo-geo-aeo audit https://example.com --profile geo -o report.md --pdf report.pdf
 
+# Site returning a hang/timeout on a WAF-protected domain? Override the UA
+# and/or the render wait strategy before assuming the site itself is down
+seo-geo-aeo audit https://example.com --profile geo --render \
+  --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
+  --wait-until load
+
 # Save it and track the domain as an outreach prospect (needs Supabase — see above)
 seo-geo-aeo audit https://example.com --profile geo --save --prospect
 
@@ -184,24 +190,37 @@ src/seo_geo_aeo/
   `sameAs` links. Third-party mention *volume*, *sentiment*, and follower/
   subscriber counts require a live web-search pass; every finding that
   depends on one says so explicitly rather than guessing.
+- **Some sites block or hang on the default bot User-Agent without
+  returning a clean error.** `SafeFetcher`'s default UA
+  (`SEOGeoAeoEngine/1.0`) self-identifies as a bot, which is correct/ethical
+  behavior for respecting robots.txt — but WAFs like Wordfence or Sucuri
+  frequently respond to *unrecognized* bot signatures by silently hanging
+  the connection rather than returning 403. Confirmed in practice: a live
+  WordPress site timed out identically on plain HTTP and on `--render`
+  under the default UA, while a standard browser UA against the exact same
+  URL returned 200 in under 10 seconds both ways. **If a fetch times out on
+  a site you can verify is up in a normal browser, try `--user-agent`
+  before concluding anything about the site or the engine.**
+- **`--render`'s default wait strategy is `load`, not `networkidle`, on
+  purpose.** Ad-heavy or analytics-heavy pages often never go fully
+  network-idle (polling, retries, chat widgets), which makes `networkidle`
+  time out on pages that actually loaded fine — confirmed on the same
+  WordPress site above, which has ~10 third-party ad/tracking embeds.
+  `load` is the more reliable default; use `--wait-until networkidle` only
+  for SPAs you know fetch data asynchronously after the load event, since
+  `load` can fire before that data arrives.
 - **Bot-protection services (Cloudflare, etc.) can block `--render` the
-  same way they'd block a real AI crawler.** If a rendered fetch comes back
-  near-empty on a site you *know* has content, that's not necessarily a bug
-  in this engine — check whether the domain's bot-fight-mode is fingerprinting
-  headless Chromium and stalling it before the app mounts. That's a genuine,
-  reportable finding in its own right (a site can be simultaneously
-  well-optimized on-page and invisible to AI crawlers because of its own
-  WAF configuration). Confirmed in practice: auditing a live SPA product
-  with `--render` showed the DOM permanently stuck on a loading spinner with
-  a Cloudflare challenge script injected — the headless browser never got
-  past it.
-- **A slow/unresponsive origin server will time out both fetchers
-  identically.** Confirmed in practice against a live domain: plain HTTP
-  timed out at ~20s and headless Chromium's `load` event never fired within
-  45s. When that happens, it's worth checking the site's own uptime/response
-  time directly before assuming anything about the engine — a page that
-  doesn't finish loading in a real browser either isn't going to score
-  differently here.
+  same way they'd block a real AI crawler** — this is a different failure
+  mode from the WAF/UA issue above, and neither `--user-agent` nor
+  `--wait-until` fixes it. If a rendered fetch comes back near-empty on a
+  site you *know* has content, check whether the domain's bot-fight-mode is
+  fingerprinting headless Chromium and stalling it before the app mounts.
+  That's a genuine, reportable finding in its own right (a site can be
+  simultaneously well-optimized on-page and invisible to AI crawlers
+  because of its own WAF configuration). Confirmed in practice: auditing a
+  live SPA product with `--render` showed the DOM permanently stuck on a
+  loading spinner with a Cloudflare challenge script injected — the
+  headless browser never got past it, under any wait strategy or UA tried.
 - **`--render` is slow.** A browser launch plus JS execution costs seconds
   per page, not milliseconds — don't run `--pages 50 --render` against a
   large SPA site without expecting it to take a while.

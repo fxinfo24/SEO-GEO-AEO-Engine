@@ -53,7 +53,7 @@ class RenderFetcher:
         user_agent: str = DEFAULT_USER_AGENT,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         respect_robots: bool = True,
-        wait_until: str = "networkidle",
+        wait_until: str = "load",
     ) -> None:
         self.user_agent = user_agent
         self.timeout_seconds = timeout_seconds

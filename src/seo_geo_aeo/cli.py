@@ -4,7 +4,7 @@ Usage:
     seo-geo-aeo audit https://example.com --profile geo
     seo-geo-aeo audit https://example.com --profile geo --pages 20
     seo-geo-aeo audit https://example.com --profile geo --pdf report.pdf
-    seo-geo-aeo audit https://example.com --profile geo --render   # SPA / React sites
+    seo-geo-aeo audit https://example.com --profile geo --user-agent "Mozilla/5.0 ..."
     seo-geo-aeo audit https://example.com --profile geo --brand-name "Example Co" --save --prospect
     seo-geo-aeo compare example.com
     seo-geo-aeo prospects --status lead
@@ -17,7 +17,7 @@ import logging
 import sys
 from urllib.parse import urlparse
 
-from seo_geo_aeo.core.fetcher import FetchError, UnsafeURLError
+from seo_geo_aeo.core.fetcher import FetchError, SafeFetcher, UnsafeURLError
 from seo_geo_aeo.core.orchestrator import run_audit, run_site_audit
 from seo_geo_aeo.reporting.markdown_report import render_markdown_report
 from seo_geo_aeo.storage.supabase_client import AuditStore, ProspectRecord, SupabaseConfigError
@@ -28,6 +28,7 @@ def _domain_from_url(url: str) -> str:
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
+    fetcher = SafeFetcher(user_agent=args.user_agent) if args.user_agent else None
     crawl_meta = None
     try:
         if args.pages > 1:
@@ -36,6 +37,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 profile=args.profile,
                 max_pages=args.pages,
                 render=args.render,
+                render_wait_until=args.wait_until,
+                fetcher=fetcher,
                 page_type_hint=args.page_type,
                 brand_name=args.brand_name,
             )
@@ -44,6 +47,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 args.url,
                 profile=args.profile,
                 render=args.render,
+                render_wait_until=args.wait_until,
+                fetcher=fetcher,
                 page_type_hint=args.page_type,
                 brand_name=args.brand_name,
             )
@@ -166,7 +171,22 @@ def build_parser() -> argparse.ArgumentParser:
         "`playwright install chromium` run once.",
     )
     audit_parser.add_argument(
+        "--wait-until", default="load", choices=["load", "domcontentloaded", "networkidle"],
+        help="Playwright wait strategy for --render (default: load). Use 'networkidle' for "
+        "SPAs that fetch data asynchronously after load — but ad/analytics-heavy sites often "
+        "never go idle and will time out on that setting. Use 'domcontentloaded' for a "
+        "faster, earlier snapshot.",
+    )
+    audit_parser.add_argument(
         "--page-type", default="default", help="homepage|blog|pillar|product|service|about"
+    )
+    audit_parser.add_argument(
+        "--user-agent",
+        help="Override the default bot User-Agent. Some sites' WAFs (Wordfence, Sucuri, "
+        "generic bot-fight-mode) silently hang or block unrecognized bot signatures rather "
+        "than returning a clean error — if a fetch times out on a site you know is up, try "
+        "a standard browser UA here before assuming the site itself is down. robots.txt is "
+        "still evaluated under whichever UA you pass.",
     )
     audit_parser.add_argument(
         "--brand-name", help="Enables the Wikipedia/Wikidata check in brand_authority"

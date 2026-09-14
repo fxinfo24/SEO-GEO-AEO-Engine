@@ -87,6 +87,7 @@ def run_audit(
     profile: str = "geo",
     fetcher: SafeFetcher | None = None,
     render: bool = False,
+    render_wait_until: str = "load",
     page_type_hint: str = "default",
     brand_name: str | None = None,
 ) -> CompositeResult:
@@ -98,6 +99,12 @@ def run_audit(
     shell. All auxiliary checks (robots.txt, exposed-path probes, sameAs
     reachability) still use a plain SafeFetcher regardless of `render`,
     since rendering those is unnecessary overhead.
+
+    `render_wait_until` defaults to "load" rather than Playwright's
+    "networkidle" — ad-heavy or analytics-heavy sites often never go fully
+    idle, which makes networkidle time out on pages that actually loaded
+    fine. Use "networkidle" for SPAs that fetch data asynchronously after
+    the load event, or "domcontentloaded" for a faster, earlier snapshot.
     """
     if profile not in _PAGE_DIMENSIONS:
         raise ValueError(f"Unknown profile {profile!r}; choose from {sorted(_PAGE_DIMENSIONS)}")
@@ -108,7 +115,9 @@ def run_audit(
         from seo_geo_aeo.core.render_fetcher import RenderFetcher
 
         with RenderFetcher(
-            user_agent=aux_fetcher.user_agent, respect_robots=aux_fetcher.respect_robots
+            user_agent=aux_fetcher.user_agent,
+            respect_robots=aux_fetcher.respect_robots,
+            wait_until=render_wait_until,
         ) as render_fetcher:
             fetch_result = render_fetcher.fetch(url)
     else:
@@ -145,6 +154,7 @@ def run_site_audit(
     max_pages: int = 20,
     fetcher: SafeFetcher | None = None,
     render: bool = False,
+    render_wait_until: str = "load",
     page_type_hint: str = "default",
     brand_name: str | None = None,
 ) -> tuple[CompositeResult, dict]:
@@ -155,7 +165,7 @@ def run_site_audit(
     necessary for SPA sites where both content AND internal links only exist
     after JS runs. This is significantly slower (a browser launch is not
     free) and NOT recommended for large `max_pages` on a server-rendered
-    site that doesn't need it.
+    site that doesn't need it. See `run_audit` for `render_wait_until`.
 
     Returns (result, crawl_meta) where crawl_meta reports pages crawled,
     failed URLs, and offsite links skipped — useful for sanity-checking the
@@ -170,7 +180,9 @@ def run_site_audit(
         from seo_geo_aeo.core.render_fetcher import RenderFetcher
 
         with RenderFetcher(
-            user_agent=aux_fetcher.user_agent, respect_robots=aux_fetcher.respect_robots
+            user_agent=aux_fetcher.user_agent,
+            respect_robots=aux_fetcher.respect_robots,
+            wait_until=render_wait_until,
         ) as render_fetcher:
             crawl_result = crawl_site(seed_url, fetcher=render_fetcher, max_pages=max_pages)
     else:
