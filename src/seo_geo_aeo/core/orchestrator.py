@@ -88,6 +88,7 @@ def run_audit(
     fetcher: SafeFetcher | None = None,
     render: bool = False,
     render_wait_until: str = "load",
+    render_timeout_seconds: float = 30.0,
     page_type_hint: str = "default",
     brand_name: str | None = None,
 ) -> CompositeResult:
@@ -105,6 +106,10 @@ def run_audit(
     idle, which makes networkidle time out on pages that actually loaded
     fine. Use "networkidle" for SPAs that fetch data asynchronously after
     the load event, or "domcontentloaded" for a faster, earlier snapshot.
+
+    `render_timeout_seconds` defaults to 30 (Playwright's own default) —
+    raise it for pages with slow third-party ad/analytics loads, which can
+    legitimately vary run-to-run on the same URL.
     """
     if profile not in _PAGE_DIMENSIONS:
         raise ValueError(f"Unknown profile {profile!r}; choose from {sorted(_PAGE_DIMENSIONS)}")
@@ -118,6 +123,7 @@ def run_audit(
             user_agent=aux_fetcher.user_agent,
             respect_robots=aux_fetcher.respect_robots,
             wait_until=render_wait_until,
+            timeout_seconds=render_timeout_seconds,
         ) as render_fetcher:
             fetch_result = render_fetcher.fetch(url)
     else:
@@ -155,6 +161,7 @@ def run_site_audit(
     fetcher: SafeFetcher | None = None,
     render: bool = False,
     render_wait_until: str = "load",
+    render_timeout_seconds: float = 30.0,
     page_type_hint: str = "default",
     brand_name: str | None = None,
 ) -> tuple[CompositeResult, dict]:
@@ -165,7 +172,8 @@ def run_site_audit(
     necessary for SPA sites where both content AND internal links only exist
     after JS runs. This is significantly slower (a browser launch is not
     free) and NOT recommended for large `max_pages` on a server-rendered
-    site that doesn't need it. See `run_audit` for `render_wait_until`.
+    site that doesn't need it. See `run_audit` for `render_wait_until` and
+    `render_timeout_seconds`.
 
     Returns (result, crawl_meta) where crawl_meta reports pages crawled,
     failed URLs, and offsite links skipped — useful for sanity-checking the
@@ -183,6 +191,7 @@ def run_site_audit(
             user_agent=aux_fetcher.user_agent,
             respect_robots=aux_fetcher.respect_robots,
             wait_until=render_wait_until,
+            timeout_seconds=render_timeout_seconds,
         ) as render_fetcher:
             crawl_result = crawl_site(seed_url, fetcher=render_fetcher, max_pages=max_pages)
     else:

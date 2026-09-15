@@ -1,4 +1,11 @@
-"""Renders a CompositeResult into a client-ready PDF, using reportlab.
+"""Renders CompositeResult(s) into client-ready PDFs, using reportlab.
+
+Two entry points:
+- render_pdf_report: single-profile report (existing behavior).
+- render_comprehensive_pdf_report: combines SEO + AEO + GEO results for the
+  same domain into one document — an executive summary page, a deduplicated
+  cross-profile priority-actions list, then a full breakdown section per
+  profile.
 
 Port of geo-report-pdf's intent — the source skill referenced a script path
 that didn't exist in the repo, so this is a fresh implementation against
@@ -23,7 +30,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from seo_geo_aeo.core.scoring import CompositeResult, Severity
+from seo_geo_aeo.core.scoring import CompositeResult, Finding, Severity
 
 _SEVERITY_COLOR = {
     Severity.CRITICAL: colors.HexColor("#b91c1c"),
@@ -40,6 +47,13 @@ _RATING_COLOR = {
     "Critical": colors.HexColor("#b91c1c"),
 }
 
+_SEVERITY_ORDER = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
+
+# Canonical display order — SEO first (most familiar), then AEO, then GEO
+# (broadest/newest surface), so a reader moves from familiar to novel.
+_PROFILE_ORDER = ["seo", "aeo", "geo"]
+_PROFILE_LABEL = {"seo": "SEO", "aeo": "AEO", "geo": "GEO"}
+
 
 def _build_styles() -> dict[str, ParagraphStyle]:
     base = getSampleStyleSheet()
@@ -47,15 +61,99 @@ def _build_styles() -> dict[str, ParagraphStyle]:
         "title": ParagraphStyle("ReportTitle", parent=base["Title"], fontSize=20, spaceAfter=4),
         "subtitle": ParagraphStyle("ReportSubtitle", parent=base["Normal"], fontSize=11, textColor=colors.grey),
         "h2": ParagraphStyle("SectionHeading", parent=base["Heading2"], spaceBefore=18, spaceAfter=8),
+        "h3": ParagraphStyle("SubHeading", parent=base["Heading3"], spaceBefore=10, spaceAfter=6),
         "body": ParagraphStyle("Body", parent=base["Normal"], fontSize=9.5, leading=13),
+        "small": ParagraphStyle("Small", parent=base["Normal"], fontSize=8.5, leading=11, textColor=colors.grey),
         "score_big": ParagraphStyle(
             "ScoreBig", parent=base["Normal"], fontSize=36, leading=40, alignment=1
+        ),
+        "score_medium": ParagraphStyle(
+            "ScoreMedium", parent=base["Normal"], fontSize=24, leading=28, alignment=1
         ),
     }
 
 
+def _score_card(profile: str, result: CompositeResult, styles: dict[str, ParagraphStyle]) -> Table:
+    """One profile's score as a compact colored card, used in the summary row."""
+    rating_color = _RATING_COLOR.get(result.rating(), colors.black)
+    score_style = ParagraphStyle("CardScore", parent=styles["score_medium"], textColor=rating_color)
+    label_style = ParagraphStyle("CardLabel", parent=styles["body"], alignment=1, fontSize=11)
+    rating_style = ParagraphStyle(
+        "CardRating", parent=styles["body"], alignment=1, textColor=rating_color, fontSize=10
+    )
+    cell = [
+        [Paragraph(f"<b>{_PROFILE_LABEL[profile]}</b>", label_style)],
+        [Paragraph(f"{result.overall_score}", score_style)],
+        [Paragraph(f"/100 · {result.rating()}", rating_style)],
+    ]
+    table = Table(cell, colWidths=[2.0 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#d1d5db")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
+                ("TOPPADDING", (0, 0), (-1, 0), 10),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 10),
+                ("TOPPADDING", (0, 1), (-1, 1), 2),
+                ("BOTTOMPADDING", (0, 1), (-1, 1), 2),
+            ]
+        )
+    )
+    return table
+
+
+def _breakdown_table(result: CompositeResult) -> Table:
+    rows = [["Dimension", "Score", "Weight"]]
+    for dim, weight in sorted(result.weights.items(), key=lambda kv: -kv[1]):
+        ds = result.dimension_scores[dim]
+        rows.append([dim.replace("_", " ").title(), f"{ds.score}/100", f"{weight:.0%}"])
+    table = Table(rows, colWidths=[3.2 * inch, 1.5 * inch, 1.5 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f4f6")]),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    return table
+
+
+def _findings_table(findings: list[Finding], styles: dict[str, ParagraphStyle]) -> Table:
+    rows = [["Severity", "Finding", "Detail"]]
+    for f in findings:
+        severity_cell = Paragraph(
+            f'<font color="{_SEVERITY_COLOR[f.severity].hexval()}"><b>{f.severity.value.upper()}</b></font>',
+            styles["body"],
+        )
+        rows.append(
+            [severity_cell, Paragraph(f.title, styles["body"]), Paragraph(f.detail, styles["body"])]
+        )
+    table = Table(rows, colWidths=[0.9 * inch, 2.0 * inch, 3.3 * inch], repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTSIZE", (0, 0), (-1, 0), 9.5),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    return table
+
+
 def render_pdf_report(domain: str, result: CompositeResult, output_path: str) -> str:
-    """Write a PDF report for `result` to `output_path`. Returns the path written."""
+    """Write a single-profile PDF report for `result` to `output_path`."""
     styles = _build_styles()
     doc = SimpleDocTemplate(
         output_path,
@@ -73,9 +171,7 @@ def render_pdf_report(domain: str, result: CompositeResult, output_path: str) ->
     story.append(Spacer(1, 0.25 * inch))
 
     rating_color = _RATING_COLOR.get(result.rating(), colors.black)
-    score_style = ParagraphStyle(
-        "ScoreColored", parent=styles["score_big"], textColor=rating_color
-    )
+    score_style = ParagraphStyle("ScoreColored", parent=styles["score_big"], textColor=rating_color)
     story.append(Paragraph(f"{result.overall_score}/100", score_style))
     story.append(
         Paragraph(
@@ -86,56 +182,13 @@ def render_pdf_report(domain: str, result: CompositeResult, output_path: str) ->
     story.append(Spacer(1, 0.3 * inch))
 
     story.append(Paragraph("Score Breakdown", styles["h2"]))
-    breakdown_rows = [["Dimension", "Score", "Weight"]]
-    for dim, weight in sorted(result.weights.items(), key=lambda kv: -kv[1]):
-        ds = result.dimension_scores[dim]
-        breakdown_rows.append([dim.replace("_", " ").title(), f"{ds.score}/100", f"{weight:.0%}"])
-    breakdown_table = Table(breakdown_rows, colWidths=[3.2 * inch, 1.5 * inch, 1.5 * inch])
-    breakdown_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f4f6")]),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]
-        )
-    )
-    story.append(breakdown_table)
+    story.append(_breakdown_table(result))
 
     findings = result.findings
+    story.append(Paragraph("Findings", styles["h2"]))
     if findings:
-        story.append(Paragraph("Findings", styles["h2"]))
-        finding_rows = [["Severity", "Finding", "Detail"]]
-        for f in findings:
-            severity_cell = Paragraph(
-                f'<font color="{_SEVERITY_COLOR[f.severity].hexval()}"><b>{f.severity.value.upper()}</b></font>',
-                styles["body"],
-            )
-            finding_rows.append(
-                [severity_cell, Paragraph(f.title, styles["body"]), Paragraph(f.detail, styles["body"])]
-            )
-        findings_table = Table(finding_rows, colWidths=[0.9 * inch, 2.0 * inch, 3.3 * inch], repeatRows=1)
-        findings_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTSIZE", (0, 0), (-1, 0), 9.5),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ]
-            )
-        )
-        story.append(findings_table)
+        story.append(_findings_table(findings, styles))
     else:
-        story.append(Paragraph("Findings", styles["h2"]))
         story.append(Paragraph("No issues found across the scored dimensions.", styles["body"]))
 
     critical_and_high = [f for f in findings if f.severity in (Severity.CRITICAL, Severity.HIGH)]
@@ -145,6 +198,102 @@ def render_pdf_report(domain: str, result: CompositeResult, output_path: str) ->
         for i, f in enumerate(critical_and_high[:8], start=1):
             story.append(Paragraph(f"<b>{i}. {f.title}</b> — {f.detail}", styles["body"]))
             story.append(Spacer(1, 0.08 * inch))
+
+    doc.build(story)
+    return output_path
+
+
+def render_comprehensive_pdf_report(
+    domain: str, results: dict[str, CompositeResult], output_path: str
+) -> str:
+    """Write one PDF combining SEO + AEO + GEO results for the same domain.
+
+    `results` maps profile name ("seo"/"aeo"/"geo") to its CompositeResult —
+    pass whichever subset you have; the report adapts to however many are
+    present. Findings that appear under the same title in more than one
+    profile (common between AEO and GEO, which share several dimensions)
+    are shown once in the cross-profile summary with the affected profiles
+    noted, rather than repeated — full per-profile findings still appear in
+    each profile's own detailed section later in the document.
+    """
+    present = [p for p in _PROFILE_ORDER if p in results]
+    if not present:
+        raise ValueError("results must contain at least one of 'seo', 'aeo', 'geo'")
+
+    styles = _build_styles()
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=letter,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+    )
+    story = []
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # --- Cover / executive summary ---
+    story.append(Paragraph("SEO / AEO / GEO Audit Report", styles["title"]))
+    story.append(Paragraph(f"{domain} — generated {now}", styles["subtitle"]))
+    story.append(Spacer(1, 0.3 * inch))
+
+    cards = [_score_card(p, results[p], styles) for p in present]
+    card_row = Table([cards], colWidths=[2.1 * inch] * len(cards))
+    card_row.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+    story.append(card_row)
+    story.append(Spacer(1, 0.35 * inch))
+
+    # --- Cross-profile priority actions (deduplicated by finding title) ---
+    findings_by_title: dict[str, tuple[Finding, list[str]]] = {}
+    for p in present:
+        for f in results[p].findings:
+            if f.severity not in (Severity.CRITICAL, Severity.HIGH):
+                continue
+            if f.title in findings_by_title:
+                findings_by_title[f.title][1].append(_PROFILE_LABEL[p])
+            else:
+                findings_by_title[f.title] = (f, [_PROFILE_LABEL[p]])
+
+    if findings_by_title:
+        story.append(Paragraph("Top Priority Actions (all profiles)", styles["h2"]))
+        ordered = sorted(
+            findings_by_title.values(), key=lambda item: _SEVERITY_ORDER[item[0].severity]
+        )
+        for i, (f, profiles) in enumerate(ordered[:10], start=1):
+            tag = "/".join(sorted(profiles))
+            story.append(
+                Paragraph(f"<b>{i}. [{tag}] {f.title}</b> — {f.detail}", styles["body"])
+            )
+            story.append(Spacer(1, 0.08 * inch))
+    else:
+        story.append(Paragraph("Top Priority Actions (all profiles)", styles["h2"]))
+        story.append(Paragraph("No critical or high-severity findings across any profile.", styles["body"]))
+
+    # --- Per-profile detailed sections ---
+    for p in present:
+        result = results[p]
+        story.append(PageBreak())
+        story.append(Paragraph(f"{_PROFILE_LABEL[p]} — Detailed Report", styles["title"]))
+        rating_color = _RATING_COLOR.get(result.rating(), colors.black)
+        story.append(
+            Paragraph(
+                f'<font color="{rating_color.hexval()}"><b>{result.overall_score}/100 '
+                f"({result.rating()})</b></font>",
+                styles["body"],
+            )
+        )
+        story.append(Spacer(1, 0.2 * inch))
+
+        story.append(Paragraph("Score Breakdown", styles["h3"]))
+        story.append(_breakdown_table(result))
+        story.append(Spacer(1, 0.15 * inch))
+
+        findings = result.findings
+        story.append(Paragraph("Findings", styles["h3"]))
+        if findings:
+            story.append(_findings_table(findings, styles))
+        else:
+            story.append(Paragraph("No issues found across the scored dimensions.", styles["body"]))
 
     doc.build(story)
     return output_path

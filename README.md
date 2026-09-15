@@ -1,230 +1,271 @@
-# SEO/GEO/AEO Engine
+# SEO / GEO / AEO Engine
+
+A deterministic Python engine that audits a URL (or a crawled site) for visibility across
+traditional search (**SEO**), AI answer engines (**GEO** — Generative Engine Optimization),
+and answer/voice assistants (**AEO**). One fetch, one parse, six scoring dimensions,
+markdown + PDF output, optional Supabase-backed history.
 
 Repo: https://github.com/fxinfo24/SEO-GEO-AEO-Engine
 
-A single Python engine that audits a site's visibility across three surfaces
-that used to require three different toolchains: traditional search engines
-(**SEO**), AI answer engines like ChatGPT/Perplexity/Gemini (**GEO** —
-Generative Engine Optimization), and voice/answer assistants (**AEO** —
-Answer Engine Optimization). It fetches a page (or crawls a site), scores it
-across six weighted dimensions, and returns a number, a prioritized finding
-list, and — optionally — a PDF, a saved Supabase record, and a delta against
-the last time you ran it.
+---
 
-## The problem this solves
+## Read this first: what this actually is
 
-Search visibility fractured. A page can rank #1 on Google and still never
-get cited by ChatGPT, because ChatGPT and Google weigh almost entirely
-different signals — Wikipedia and Reddit dominate AI citations in a way
-neither dominates classic SERPs. Auditing for both used to mean either:
+This is **v0.3 of a working tool with real, verifiable gaps.** It is not a finished
+product, it has never been used against a paying client, and parts of it have never
+executed successfully even once. Everything below is stated plainly so you can decide
+what to trust.
 
-1. **Paying for 3-4 separate SaaS tools** (an SEO crawler, a GEO/AI-visibility
-   tracker, a schema validator, a PDF report generator) that don't share
-   data, so you can't see how a fix to one score moved the others, and
-2. **Re-running the same manual checklist by hand** — or worse, asking an
-   LLM to "audit this page" fresh each time, which re-derives a score from
-   a written rubric with no guarantee two runs agree, and produces no
-   history to compare against.
+**What genuinely works, verified against live sites:**
 
-This engine exists because auditing the 53 separate "SEO/GEO/AEO Claude
-skill" files that inspired it found exactly **one** that shipped real,
-executable scoring code. Everything else in that space — including tools
-that reference PDF-generation scripts that don't actually exist in their own
-repo — is prose instructing an LLM to re-read a rubric and eyeball a page
-each time. Good rubrics (Ahrefs Dec 2025 citation data, Princeton/Georgia
-Tech GEO research, Google's Dec 2025 Quality Rater Guidelines), no
-determinism, no persistence, no way to prove a score didn't drift between
-runs.
+- Fetching, parsing, and scoring real pages — plain HTTP and headless Chromium
+- The six scoring modules produce real, deterministic numbers from real page data
+- Multi-page same-origin crawling with cross-page finding deduplication
+- Markdown and PDF report generation, single-profile and combined multi-profile
+- SSRF protection on every request, including sub-resources of rendered pages
 
-## What it does
+**What has never been run successfully, not even once:**
 
-**Fetches and scores a page or a whole site** across six dimensions in one
-pass:
+- `--save`, `compare`, and `prospects`. The Supabase project exists and the schema is
+  migrated, but no service-role key has ever been supplied, so **every line of
+  `storage/supabase_client.py` is untested against a real database.** It compiles. That
+  is all anyone can currently claim about it.
 
-| Dimension | What it measures | Weight (GEO profile) |
-|---|---|---|
-| AI Citability | How extractable/quotable each content block is — direct-answer openings, self-containment, sourced stats, structure | 25% |
-| Brand Authority | Wikipedia/Wikidata entity existence (real API check) + reachability of declared YouTube/Reddit/LinkedIn/GitHub profiles | 20% |
-| Content E-E-A-T | Author bylines, first-person experience language, sourcing, freshness, internal-link authority signals | 20% |
-| Technical GEO | Per-crawler robots.txt access for GPTBot, ClaudeBot, PerplexityBot, Google-Extended, and 10 others, tiered by impact + llms.txt presence | 15% |
-| Schema | JSON-LD coverage, Organization/Person entity graph, deprecated-type detection | 10% |
-| Platform Optimization | Per-platform readiness for Google AI Overviews, ChatGPT, Perplexity, Gemini, Bing Copilot individually | 10% |
+**What does not exist:**
 
-Separate weighting profiles exist for `--profile seo` (traditional
-technical/on-page) and `--profile aeo` (answer-engine-weighted).
+- **Tests. There are zero.** `tests/` is an empty directory. `pytest` is declared as a
+  dev dependency and has never been run. Every "verified" claim in this README comes
+  from manual runs against live sites during development, not from a suite you can
+  re-run. Treat refactors accordingly.
 
-**Renders JavaScript when the site needs it.** React/Vue/SPA marketing
-sites deliver an empty `<div id="root">` shell over plain HTTP — a normal
-crawler (and most AI crawlers) sees nothing. `--render` runs the page
-through headless Chromium first, with the exact same SSRF guard applied to
-every sub-resource request the rendered page makes, not just the initial
-fetch.
+---
 
-**Crawls a whole site, not just one URL.** `--pages N` does a same-origin
-BFS crawl up to N pages and aggregates every dimension across the crawl,
-deduplicating repeated findings ("No H1 found — 14 pages") instead of
-listing them 14 times.
+## The scores are not what they look like
 
-**Tracks history and outreach, not just point-in-time scores.** Every audit
-can be saved to Supabase; `compare` shows the delta since the last run,
-per-dimension; `prospects` tracks domains as an outreach pipeline (lead →
-qualified → proposal → won/lost) — useful if you're running these audits as
-part of client acquisition, not just self-auditing.
+This is the single most important thing to understand before showing anyone a number
+from this tool.
 
-**Ships both a markdown report and a client-ready PDF** from the same
-scoring run — no separate report-generation pass.
+Each profile declares a set of weighted dimensions. Not all of those dimensions have a
+module behind them. `CompositeScorer` renormalizes over whatever actually ran — which
+means **a profile can return a confident-looking `/100` while silently measuring only a
+fraction of what it claims to measure.**
 
-## How this is different from a typical SEO/GEO tool
+Actual coverage, machine-verified against the code:
 
-- **One engine, one data model, six dimensions in one pass** — not three
-  subscriptions with three different scoring scales that don't reconcile.
-- **Deterministic.** The same page scores the same way twice. No LLM
-  re-derives the rubric at request time, so there's no run-to-run drift to
-  explain to a client.
-- **Open about what it can't measure.** Search ranking position, backlink
-  Domain Rating, third-party mention sentiment/volume, and IndexNow
-  submission status are flagged explicitly as `unmeasured` in every result's
-  raw data rather than being faked with a plausible-looking number. Every
-  other tool in this category either charges extra for those (via paid
-  third-party APIs) or quietly guesses.
-- **Security-first by default, not bolted on.** Every fetch — plain HTTP or
-  headless-browser — resolves DNS and rejects loopback/private/link-local/
-  reserved ranges before connecting, re-validates after every redirect, and
-  applies the identical check to every sub-resource request a rendered page
-  makes. None of the source material this was built from had any SSRF
-  protection at all.
-- **Self-hosted, not a black-box SaaS.** It's your Python and your Supabase
-  project — no per-audit metering, no vendor lock-in on the data.
+| Profile | Declared weight actually backed by a module | Declared but never produced | Computed then discarded |
+|---|---|---|---|
+| **GEO** | **100%** | — | — |
+| **AEO** | **85%** | `live_citation` (15%) | `platform_optimization` |
+| **SEO** | **40%** | `technical_seo` (35%), `content_quality` (25%) | — |
 
-## Setup
+Reproduce it yourself:
 
 ```bash
-cd seo-geo-aeo-engine
+python3 -c "
+from seo_geo_aeo.core.scoring import PROFILE_WEIGHTS
+from seo_geo_aeo.core.orchestrator import _PAGE_DIMENSIONS, _DOMAIN_DIMENSIONS
+for p in ('seo','aeo','geo'):
+    declared = set(PROFILE_WEIGHTS[p]); produced = set(_PAGE_DIMENSIONS[p]) | set(_DOMAIN_DIMENSIONS[p])
+    print(p, f'{sum(PROFILE_WEIGHTS[p][d] for d in declared & produced):.0%}', sorted(declared - produced))
+"
+```
+
+**What this means in practice:**
+
+- **GEO is the only profile you should quote as-is.** All six of its dimensions are real.
+- **AEO is close** — it's missing live citation testing (actually querying ChatGPT/
+  Perplexity to see whether the page gets cited), which is the entire point of the "AEO"
+  label. It also computes `platform_optimization` and then throws it away, because that
+  dimension isn't in the AEO weight table. That's wasted work and an inconsistency, not
+  a design decision.
+- **SEO is the weakest and most misleading.** A "66.9/100 SEO score" is really an
+  on-page + schema score wearing an SEO label. Core crawlability, indexability, Core Web
+  Vitals, and content-quality analysis — 60% of what the profile claims to weigh — do not
+  exist as modules. `seo_technical.py` exists and is decent, but it registers under
+  `on_page`, not `technical_seo`.
+
+Fixing this means either building the missing modules or honestly rewriting the weight
+tables to match reality. Until one of those happens, the SEO number should not go in
+front of a client.
+
+---
+
+## Why it exists
+
+Search visibility fractured. A page can rank well on Google and never be cited by
+ChatGPT, because the two weigh largely different signals — per Ahrefs' Dec 2025 citation
+data, Wikipedia accounts for ~47.9% of ChatGPT's cited domains and Reddit ~46.7% of
+Perplexity's, concentrations that have no equivalent in classic SERPs.
+
+This started as a port of `aeo-seo-geo-masterlist`, a collection of 53 SEO/GEO/AEO
+"Claude skills." An audit of all 53 found **exactly one** that shipped executable code.
+The rest were markdown files instructing an LLM to re-read a rubric and eyeball a page —
+including one that referenced a PDF-generation script absent from its own repo. The
+rubrics themselves were well-sourced (Ahrefs Dec 2025, Princeton/Georgia Tech GEO
+research, Google's Dec 2025 Quality Rater Guidelines). The execution was prose.
+
+So the rubrics got ported into deterministic Python: same page in, same score out, every
+time, with history you can diff. That part of the premise holds. The part where all
+three profiles are equally complete does not yet — see above.
+
+## What it measures
+
+| Dimension | What it checks | GEO weight |
+|---|---|---|
+| AI Citability | Per-block extractability: direct-answer openings, self-containment, sourced stats, structure | 25% |
+| Brand Authority | Wikipedia/Wikidata entity existence (live API), reachability of schema-declared social profiles | 20% |
+| Content E-E-A-T | Author bylines, first-person experience language, sourcing, freshness, internal linking | 20% |
+| Technical GEO | robots.txt access for 14 AI crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended…) tiered by impact, plus llms.txt | 15% |
+| Schema | JSON-LD coverage, Organization/Person entity graph, deprecated types | 10% |
+| Platform Optimization | Per-platform readiness for Google AIO, ChatGPT, Perplexity, Gemini, Bing Copilot | 10% |
+
+## Install
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-playwright install chromium   # only needed for --render
-cp .env.example .env          # fill in SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+playwright install chromium        # only if you need --render
+cp .env.example .env               # only if you want --save/compare/prospects
 ```
 
-Run the migration against your Supabase project (SQL editor, or
-`supabase db push`):
-
-```bash
-supabase/migrations/0001_init.sql
-```
-
-> **Supabase status: provisioned.** A dedicated project (`seo-geo-aeo-engine`,
-> ref `bdapoclfqymoifdxyeiq`, free tier) is live and the migration above is
-> already applied — `prospects`, `audits`, and `audit_findings` exist with
-> RLS enabled. `.env` on the dev machine has `SUPABASE_URL` filled in;
-> `SUPABASE_SERVICE_ROLE_KEY` still needs to be pasted in manually from
-> [Project Settings → API](https://supabase.com/dashboard/project/bdapoclfqymoifdxyeiq/settings/api)
-> before `--save`, `compare`, or `prospects` will work — that key is a
-> secret and is deliberately never handled by tooling on your behalf.
+Python 3.12 is what this is developed and run on. **3.14 does not work** — `pydantic-core`
+(a Supabase dependency) has no 3.14 wheel and falls back to a Rust source build that
+hangs indefinitely. This cost an hour to diagnose; use 3.12.
 
 ## Usage
 
 ```bash
-# One-off single-page audit, prints markdown to stdout
+# Single page, GEO profile (the one to trust)
 seo-geo-aeo audit https://example.com --profile geo
 
-# React/Vue/SPA site — render through headless Chromium first
+# SPA / React site — server HTML is an empty shell without this
 seo-geo-aeo audit https://example.com --profile geo --render
 
-# Crawl up to 20 same-origin pages and aggregate scores
+# Crawl and aggregate across pages
 seo-geo-aeo audit https://example.com --profile geo --pages 20
 
-# Also enables the Wikipedia/Wikidata check
+# Enables the live Wikipedia/Wikidata lookup in brand_authority
 seo-geo-aeo audit https://example.com --profile geo --brand-name "Example Co"
 
-# Markdown + PDF output
-seo-geo-aeo audit https://example.com --profile geo -o report.md --pdf report.pdf
+# Combined SEO+AEO+GEO PDF: score cards, cross-profile priorities, per-profile detail
+seo-geo-aeo report https://example.com --pdf report.pdf
 
-# Site returning a hang/timeout on a WAF-protected domain? Override the UA
-# and/or the render wait strategy before assuming the site itself is down
-seo-geo-aeo audit https://example.com --profile geo --render \
+# When a site's WAF hangs the default bot UA and the page is slow
+seo-geo-aeo report https://example.com --render --timeout 60 \
   --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
-  --wait-until load
+  --pdf report.pdf
 
-# Save it and track the domain as an outreach prospect (needs Supabase — see above)
-seo-geo-aeo audit https://example.com --profile geo --save --prospect
-
-# Compare the two most recent saved audits for a domain
+# Supabase-backed — code path has never successfully executed, see above
+seo-geo-aeo audit https://example.com --save --prospect
 seo-geo-aeo compare example.com
-
-# List prospects
 seo-geo-aeo prospects --status lead
 ```
+
+## Things that will bite you, learned the hard way
+
+Every item here was hit during development against real sites. None are hypothetical.
+
+**The default User-Agent gets silently hung by some WAFs.** `SEOGeoAeoEngine/1.0`
+self-identifies as a bot, which is the ethically correct thing to do. Wordfence-class
+WAFs frequently respond to unrecognized bot signatures by hanging the connection rather
+than returning 403. On a live WordPress site this produced a ~20s timeout on plain HTTP
+*and* on `--render`, while a browser UA against the identical URL returned 200 in 7.5s.
+The first diagnosis was "the origin server is slow." That was wrong. **If a fetch times
+out on a site you can load in a browser, try `--user-agent` before concluding anything.**
+
+**`networkidle` is a trap on ad-heavy pages.** Playwright's `networkidle` never fires
+when ad networks, analytics, and chat widgets keep polling. It was the original default
+and it timed out on pages that had loaded fine. The default is now `load`. Use
+`--wait-until networkidle` only for SPAs you know fetch data after the load event.
+
+**Render timing genuinely varies run to run.** The same URL with the same flags took
+13s once and >30s another time, purely from third-party ad load variance. That's why
+`--timeout` exists. A timeout is not proof a site is broken.
+
+**Bot protection can defeat `--render` entirely, and neither flag helps.** On one live
+SPA, Cloudflare's challenge script kept the DOM pinned to a loading spinner under every
+wait strategy and UA tried. This is worth reporting *as a finding* — if headless Chromium
+can't get through, GPTBot and PerplexityBot plausibly can't either, which means the site
+is invisible to AI search because of its own WAF config. That's a real diagnosis, not a
+tool failure.
+
+**`--render` is slow.** Browser launch plus JS execution is seconds per page. A combined
+three-profile `report --render` run on one URL took ~8 minutes, because each profile
+re-fetches independently. Don't run `--pages 50 --render` casually.
+
+## What it cannot measure, and does not pretend to
+
+These are absent because they need paid APIs or a live search pass. Every affected
+dimension records them in `raw["unmeasured"]` rather than substituting a plausible
+number:
+
+- **Search ranking position** — any platform, any query
+- **Backlink authority / Domain Rating** — needs Ahrefs/Semrush-class data
+- **Third-party mention volume and sentiment** — `brand_authority` checks whether a site
+  *declares* a YouTube/Reddit/LinkedIn profile via schema `sameAs` and whether that URL
+  resolves. It cannot see whether anyone is actually talking about the brand there. A
+  site with three dead social links and zero mentions scores identically to one with an
+  active community, as long as the URLs return 200.
+- **Follower/subscriber counts**
+- **Live AI citation testing** — nothing here queries ChatGPT or Perplexity to check
+  whether a page is cited in practice. This is the `live_citation` gap that makes the
+  AEO profile 85% rather than complete.
+- **Real client-side render performance** — only server response time is captured
+- **IndexNow / Bing WMT / Knowledge Panel / Google Business Profile status**
+
+`platform_optimization` deserves a specific caveat: the source rubric's heaviest weights
+were ranking position and community discussion volume, neither of which is obtainable
+here. What remains is a proxy built from on-page signals and declared social presence. It
+is directionally useful and it is not the rubric it was ported from.
+
+## How it differs from commercial tools
+
+Honestly: it's narrower, it's free, it's yours, and it shows its work.
+
+- **Deterministic.** Same page, same score, twice. No LLM re-deriving a rubric per run,
+  so no drift to explain away.
+- **One data model across three profiles**, so a fix's effect on all three is visible at
+  once — rather than three subscriptions with three incompatible scales.
+- **Explicit about gaps.** The `unmeasured` lists and the coverage table above are the
+  differentiator. Commercial tools in this space either charge for that data or quietly
+  paper over its absence.
+- **SSRF-guarded by default.** Every fetch resolves DNS and rejects loopback, private,
+  link-local, and reserved ranges before connecting; re-validates after redirects; and
+  applies the identical check to every sub-resource a rendered page requests. None of the
+  53 source skills had any SSRF protection whatsoever.
+- **Self-hosted.** Your Python, your Supabase project, no per-audit metering.
+
+What commercial tools have that this doesn't: rank tracking, backlink indexes, real
+citation monitoring, test coverage, and a support contract.
 
 ## Architecture
 
 ```
 src/seo_geo_aeo/
 ├── core/
-│   ├── fetcher.py         # SSRF-guarded, robots.txt-aware plain HTTP fetcher
-│   ├── render_fetcher.py  # Headless-Chromium fetcher, same SSRF guard per sub-request
-│   ├── crawler.py         # Same-origin BFS site crawl, page-budgeted
-│   ├── parser.py          # HTML -> structured page data + schema.org extraction
+│   ├── fetcher.py         # SSRF-guarded, robots.txt-aware HTTP fetcher
+│   ├── render_fetcher.py  # Headless Chromium; same SSRF guard per sub-request
+│   ├── crawler.py         # Same-origin BFS crawl, page-budgeted
+│   ├── parser.py          # HTML → structured page data + JSON-LD extraction
 │   ├── scoring.py         # Weighted composite scorer, cross-page aggregation
-│   └── orchestrator.py    # Wires fetch -> parse -> all six modules -> composite score
-├── modules/
-│   ├── geo_citability.py       # AI Citability
-│   ├── brand_authority.py      # Brand Authority (Wikipedia/Wikidata + sameAs)
-│   ├── eeat.py                 # Content E-E-A-T
-│   ├── geo_crawlers.py         # Technical GEO (per-crawler robots.txt matrix)
-│   ├── geo_schema.py           # Schema
-│   ├── platform_optimization.py # Platform Optimization (5 platforms)
-│   └── seo_technical.py        # On-page/technical SEO (--profile seo)
-├── reporting/
-│   ├── markdown_report.py
-│   └── pdf_report.py
-└── storage/
-    └── supabase_client.py      # audits / audit_findings / prospects tables
+│   └── orchestrator.py    # fetch → parse → modules → composite
+├── modules/               # The six scoring dimensions + seo_technical
+├── reporting/             # markdown_report, pdf_report (single + comprehensive)
+└── storage/               # supabase_client — compiles, never executed live
 ```
 
-## Honest limitations
+## Status
 
-- **`brand_authority` and `platform_optimization` score only what's
-  programmatically verifiable** — Wikipedia/Wikidata existence (real API
-  calls), and reachability of profiles a site self-declares via schema.org
-  `sameAs` links. Third-party mention *volume*, *sentiment*, and follower/
-  subscriber counts require a live web-search pass; every finding that
-  depends on one says so explicitly rather than guessing.
-- **Some sites block or hang on the default bot User-Agent without
-  returning a clean error.** `SafeFetcher`'s default UA
-  (`SEOGeoAeoEngine/1.0`) self-identifies as a bot, which is correct/ethical
-  behavior for respecting robots.txt — but WAFs like Wordfence or Sucuri
-  frequently respond to *unrecognized* bot signatures by silently hanging
-  the connection rather than returning 403. Confirmed in practice: a live
-  WordPress site timed out identically on plain HTTP and on `--render`
-  under the default UA, while a standard browser UA against the exact same
-  URL returned 200 in under 10 seconds both ways. **If a fetch times out on
-  a site you can verify is up in a normal browser, try `--user-agent`
-  before concluding anything about the site or the engine.**
-- **`--render`'s default wait strategy is `load`, not `networkidle`, on
-  purpose.** Ad-heavy or analytics-heavy pages often never go fully
-  network-idle (polling, retries, chat widgets), which makes `networkidle`
-  time out on pages that actually loaded fine — confirmed on the same
-  WordPress site above, which has ~10 third-party ad/tracking embeds.
-  `load` is the more reliable default; use `--wait-until networkidle` only
-  for SPAs you know fetch data asynchronously after the load event, since
-  `load` can fire before that data arrives.
-- **Bot-protection services (Cloudflare, etc.) can block `--render` the
-  same way they'd block a real AI crawler** — this is a different failure
-  mode from the WAF/UA issue above, and neither `--user-agent` nor
-  `--wait-until` fixes it. If a rendered fetch comes back near-empty on a
-  site you *know* has content, check whether the domain's bot-fight-mode is
-  fingerprinting headless Chromium and stalling it before the app mounts.
-  That's a genuine, reportable finding in its own right (a site can be
-  simultaneously well-optimized on-page and invisible to AI crawlers
-  because of its own WAF configuration). Confirmed in practice: auditing a
-  live SPA product with `--render` showed the DOM permanently stuck on a
-  loading spinner with a Cloudflare challenge script injected — the
-  headless browser never got past it, under any wait strategy or UA tried.
-- **`--render` is slow.** A browser launch plus JS execution costs seconds
-  per page, not milliseconds — don't run `--pages 50 --render` against a
-  large SPA site without expecting it to take a while.
-- **No search-ranking, backlink-authority, or IndexNow signal anywhere.**
-  These need paid third-party APIs (Ahrefs/Semrush-class data) that aren't
-  wired in; every dimension that would include them documents the gap in
-  its `raw["unmeasured"]` field.
+v0.3. Working tool, honest gaps, no test suite, Supabase path unproven.
+
+Roadmap, in the order that would matter most:
+
+1. **Write tests.** Nothing else should ship first.
+2. **Fix the SEO profile** — build `technical_seo` and `content_quality`, or rewrite the
+   weight table to stop claiming them.
+3. **Run the Supabase path once** with a real key and find out what breaks.
+4. Resolve the AEO `platform_optimization` compute-then-discard inconsistency.
+5. `live_citation` module, if a reliable way to test AI citation exists.
+6. Share one fetch across profiles in `report` instead of re-fetching per profile.
+
+MIT-licensed dependencies; the source skills were Apache-2.0 and MIT.

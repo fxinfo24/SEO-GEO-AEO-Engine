@@ -6,6 +6,7 @@ Usage:
     seo-geo-aeo audit https://example.com --profile geo --pdf report.pdf
     seo-geo-aeo audit https://example.com --profile geo --user-agent "Mozilla/5.0 ..."
     seo-geo-aeo audit https://example.com --profile geo --brand-name "Example Co" --save --prospect
+    seo-geo-aeo report https://example.com --pdf full-report.pdf
     seo-geo-aeo compare example.com
     seo-geo-aeo prospects --status lead
 """
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 
 from seo_geo_aeo.core.fetcher import FetchError, SafeFetcher, UnsafeURLError
 from seo_geo_aeo.core.orchestrator import run_audit, run_site_audit
+from seo_geo_aeo.core.scoring import CompositeResult
 from seo_geo_aeo.reporting.markdown_report import render_markdown_report
 from seo_geo_aeo.storage.supabase_client import AuditStore, ProspectRecord, SupabaseConfigError
 
@@ -38,6 +40,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 max_pages=args.pages,
                 render=args.render,
                 render_wait_until=args.wait_until,
+                render_timeout_seconds=args.timeout,
                 fetcher=fetcher,
                 page_type_hint=args.page_type,
                 brand_name=args.brand_name,
@@ -48,6 +51,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 profile=args.profile,
                 render=args.render,
                 render_wait_until=args.wait_until,
+                render_timeout_seconds=args.timeout,
                 fetcher=fetcher,
                 page_type_hint=args.page_type,
                 brand_name=args.brand_name,
@@ -99,6 +103,59 @@ def cmd_audit(args: argparse.Namespace) -> int:
         store.save_audit(domain=domain, profile=args.profile, result=result, prospect_id=prospect_id)
         print(f"Saved audit for {domain} to Supabase.")
 
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    """Run multiple profiles against one URL and combine them into one PDF."""
+    fetcher = SafeFetcher(user_agent=args.user_agent) if args.user_agent else None
+    profiles = [p.strip() for p in args.profiles.split(",") if p.strip()]
+    domain = args.domain or _domain_from_url(args.url)
+
+    results: dict[str, CompositeResult] = {}
+    for profile in profiles:
+        try:
+            if args.pages > 1:
+                result, crawl_meta = run_site_audit(
+                    args.url,
+                    profile=profile,
+                    max_pages=args.pages,
+                    render=args.render,
+                    render_wait_until=args.wait_until,
+                    render_timeout_seconds=args.timeout,
+                    fetcher=fetcher,
+                    brand_name=args.brand_name,
+                )
+                print(
+                    f"[{profile}] crawled {crawl_meta['pages_crawled']} page(s); "
+                    f"{len(crawl_meta['failed_urls'])} failed",
+                    file=sys.stderr,
+                )
+            else:
+                result = run_audit(
+                    args.url,
+                    profile=profile,
+                    render=args.render,
+                    render_wait_until=args.wait_until,
+                    render_timeout_seconds=args.timeout,
+                    fetcher=fetcher,
+                    brand_name=args.brand_name,
+                )
+            results[profile] = result
+            print(f"[{profile}] {result.overall_score}/100 ({result.rating()})", file=sys.stderr)
+        except UnsafeURLError as exc:
+            print(f"[{profile}] refused: {exc}", file=sys.stderr)
+        except FetchError as exc:
+            print(f"[{profile}] fetch failed: {exc}", file=sys.stderr)
+
+    if not results:
+        print("All profile audits failed; no report generated.", file=sys.stderr)
+        return 1
+
+    from seo_geo_aeo.reporting.pdf_report import render_comprehensive_pdf_report
+
+    render_comprehensive_pdf_report(domain, results, args.pdf)
+    print(f"Comprehensive PDF written to {args.pdf}")
     return 0
 
 
@@ -178,6 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
         "faster, earlier snapshot.",
     )
     audit_parser.add_argument(
+        "--timeout", type=float, default=30.0,
+        help="Seconds to wait for --render's page load before giving up (default: 30). Some "
+        "ad/analytics-heavy pages legitimately vary run-to-run — raise this before assuming "
+        "a timeout means the site is broken.",
+    )
+    audit_parser.add_argument(
         "--page-type", default="default", help="homepage|blog|pillar|product|service|about"
     )
     audit_parser.add_argument(
@@ -200,6 +263,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also create/update a prospect row for this domain (requires --save)",
     )
     audit_parser.set_defaults(func=cmd_audit)
+
+    report_parser = subparsers.add_parser(
+        "report", help="Run SEO+AEO+GEO (or a subset) against one URL and combine into one PDF"
+    )
+    report_parser.add_argument("url", help="Seed URL to audit, e.g. https://example.com")
+    report_parser.add_argument(
+        "--profiles", default="seo,aeo,geo",
+        help="Comma-separated profiles to include (default: seo,aeo,geo)",
+    )
+    report_parser.add_argument(
+        "--pages", type=int, default=1,
+        help="Crawl up to N same-origin pages per profile and aggregate scores (default: 1)",
+    )
+    report_parser.add_argument("--render", action="store_true", help="See `audit --render`")
+    report_parser.add_argument(
+        "--wait-until", default="load", choices=["load", "domcontentloaded", "networkidle"]
+    )
+    report_parser.add_argument(
+        "--timeout", type=float, default=30.0, help="See `audit --timeout`"
+    )
+    report_parser.add_argument("--user-agent", help="See `audit --user-agent`")
+    report_parser.add_argument("--brand-name", help="Enables the Wikipedia/Wikidata check")
+    report_parser.add_argument("--domain", help="Domain label (defaults to URL's netloc)")
+    report_parser.add_argument("--pdf", required=True, help="Path to write the combined PDF")
+    report_parser.set_defaults(func=cmd_report)
 
     compare_parser = subparsers.add_parser(
         "compare", help="Compare the two most recent saved audits for a domain"
