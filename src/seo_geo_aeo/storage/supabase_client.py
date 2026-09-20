@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from supabase import Client, create_client
-
 from seo_geo_aeo.core.scoring import CompositeResult
+from supabase import Client, create_client
 
 
 class SupabaseConfigError(RuntimeError):
@@ -77,7 +76,7 @@ class AuditStore:
             },
             "weights": result.weights,
             "prospect_id": prospect_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         inserted = self.client.table("audits").insert(audit_row).execute()
         audit_id = inserted.data[0]["id"]

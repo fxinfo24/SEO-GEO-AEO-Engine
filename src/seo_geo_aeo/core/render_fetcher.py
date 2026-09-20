@@ -27,6 +27,7 @@ include).
 from __future__ import annotations
 
 import time
+from typing import Self
 
 from seo_geo_aeo.core.fetcher import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -63,7 +64,7 @@ class RenderFetcher:
         self._playwright = None
         self._browser = None
 
-    def __enter__(self) -> "RenderFetcher":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -83,7 +84,7 @@ class RenderFetcher:
         self._playwright = sync_playwright().start()
         try:
             self._browser = self._playwright.chromium.launch(headless=True)
-        except Exception as exc:  # noqa: BLE001 - surface any launch failure as FetchError
+        except Exception as exc:
             self._playwright.stop()
             self._playwright = None
             raise FetchError(
@@ -153,7 +154,7 @@ class RenderFetcher:
             headers = dict(response.headers) if response else {}
         except UnsafeURLError:
             raise
-        except Exception as exc:  # noqa: BLE001 - Playwright raises its own TimeoutError etc.
+        except Exception as exc:
             raise FetchError(f"Render fetch failed for {url}: {exc}") from exc
         finally:
             context.close()

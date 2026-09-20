@@ -36,13 +36,13 @@ _HTTP_TIMEOUT = 15.0
 _USER_AGENT = "SEOGeoAeoEngine/1.0 (brand-authority-check)"
 
 _PLATFORM_PATTERNS = {
-    "youtube": re.compile(r"youtube\.com|youtu\.be", re.I),
-    "reddit": re.compile(r"reddit\.com", re.I),
-    "linkedin": re.compile(r"linkedin\.com", re.I),
-    "github": re.compile(r"github\.com", re.I),
-    "wikipedia": re.compile(r"wikipedia\.org", re.I),
-    "wikidata": re.compile(r"wikidata\.org", re.I),
-    "twitter_x": re.compile(r"twitter\.com|x\.com", re.I),
+    "youtube": re.compile(r"youtube\.com|youtu\.be", re.IGNORECASE),
+    "reddit": re.compile(r"reddit\.com", re.IGNORECASE),
+    "linkedin": re.compile(r"linkedin\.com", re.IGNORECASE),
+    "github": re.compile(r"github\.com", re.IGNORECASE),
+    "wikipedia": re.compile(r"wikipedia\.org", re.IGNORECASE),
+    "wikidata": re.compile(r"wikidata\.org", re.IGNORECASE),
+    "twitter_x": re.compile(r"twitter\.com|x\.com", re.IGNORECASE),
 }
 
 # Weights per geo-brand-mentions SKILL.md's composite formula.

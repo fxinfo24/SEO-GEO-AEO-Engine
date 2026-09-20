@@ -15,7 +15,7 @@ in sync with it rather than duplicating scoring logic.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -165,7 +165,7 @@ def render_pdf_report(domain: str, result: CompositeResult, output_path: str) ->
     )
     story = []
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     story.append(Paragraph(f"{result.profile.upper()} Audit Report", styles["title"]))
     story.append(Paragraph(f"{domain} — generated {now}", styles["subtitle"]))
     story.append(Spacer(1, 0.25 * inch))
@@ -230,7 +230,7 @@ def render_comprehensive_pdf_report(
         rightMargin=0.75 * inch,
     )
     story = []
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     # --- Cover / executive summary ---
     story.append(Paragraph("SEO / AEO / GEO Audit Report", styles["title"]))

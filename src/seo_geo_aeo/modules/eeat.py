@@ -10,7 +10,7 @@ intentionally out of scope here — see modules/brand_authority.py.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from seo_geo_aeo.core.parser import ParsedPage
 from seo_geo_aeo.core.scoring import DimensionScore, Finding, Severity
@@ -42,8 +42,8 @@ def _parse_date(value: str | None) -> datetime | None:
         return None
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
         try:
-            dt = datetime.strptime(value, fmt)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            dt = datetime.strptime(value, fmt)  # noqa: DTZ007 - we add tzinfo below
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         except ValueError:
             continue
     return None
@@ -109,7 +109,7 @@ def score_eeat(page: ParsedPage, *, page_type_hint: str = "default") -> Dimensio
     if published or modified:
         trustworthiness += 10.0
         reference_date = modified or published
-        if reference_date and (datetime.now(timezone.utc) - reference_date).days > 730:
+        if reference_date and (datetime.now(UTC) - reference_date).days > 730:
             findings.append(
                 Finding(
                     severity=Severity.MEDIUM,

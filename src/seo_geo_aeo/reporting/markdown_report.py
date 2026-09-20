@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from seo_geo_aeo.core.scoring import CompositeResult, Severity
 
@@ -16,7 +16,7 @@ _SEVERITY_LABEL = {
 
 def render_markdown_report(domain: str, result: CompositeResult) -> str:
     lines: list[str] = []
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     lines.append(f"# {result.profile.upper()} Audit Report: {domain}")
     lines.append(f"\n**Audit date:** {now}  ")

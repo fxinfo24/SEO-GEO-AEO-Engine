@@ -1,4 +1,6 @@
-"""Runs audits: fetch -> parse -> score -> compose, single-page or site-wide."""
+"""
+Runs audits: fetch -> parse -> score -> compose, single-page or site-wide.
+"""
 
 from __future__ import annotations
 
@@ -14,12 +16,15 @@ from seo_geo_aeo.core.scoring import (
     aggregate_dimension_scores,
 )
 from seo_geo_aeo.modules.brand_authority import extract_same_as_links, score_brand_authority
+from seo_geo_aeo.modules.content_quality import score_content_quality
 from seo_geo_aeo.modules.eeat import score_eeat
 from seo_geo_aeo.modules.geo_citability import score_citability
 from seo_geo_aeo.modules.geo_crawlers import analyze_crawler_access
 from seo_geo_aeo.modules.geo_schema import score_schema
+from seo_geo_aeo.modules.live_citation import score_live_citation
 from seo_geo_aeo.modules.platform_optimization import score_platform_optimization
-from seo_geo_aeo.modules.seo_technical import score_technical_seo
+from seo_geo_aeo.modules.seo_technical import score_technical_seo as score_on_page_factors
+from seo_geo_aeo.modules.technical_seo import score_technical_seo
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +32,8 @@ logger = logging.getLogger(__name__)
 # robots.txt fetch) so it's handled once per audit, never per-page.
 _PAGE_DIMENSIONS = {
     "geo": ("schema", "ai_citability", "content_eeat", "brand_authority", "platform_optimization"),
-    "seo": ("on_page", "schema"),
-    "aeo": ("schema", "ai_citability", "content_eeat", "brand_authority", "platform_optimization"),
+    "seo": ("technical_seo", "on_page", "content_quality", "schema"),
+    "aeo": ("schema", "ai_citability", "content_eeat", "brand_authority", "platform_optimization", "live_citation"),
 }
 _DOMAIN_DIMENSIONS = {
     "geo": ("technical_geo",),
@@ -75,8 +80,17 @@ def _score_page_dimensions(
             fetch_elapsed_seconds=fetch_elapsed_seconds,
         )
 
+    if "technical_seo" in wanted:
+        scores["technical_seo"] = score_technical_seo(page, fetcher=fetcher)
+
     if "on_page" in wanted:
-        scores["on_page"] = score_technical_seo(page, fetch_headers or {}, fetcher=fetcher)
+        scores["on_page"] = score_on_page_factors(page, fetch_headers or {}, fetcher=fetcher)
+
+    if "content_quality" in wanted:
+        scores["content_quality"] = score_content_quality(page, page_type_hint=page_type_hint)
+
+    if "live_citation" in wanted:
+        scores["live_citation"] = score_live_citation(page)
 
     return scores
 
@@ -92,25 +106,6 @@ def run_audit(
     page_type_hint: str = "default",
     brand_name: str | None = None,
 ) -> CompositeResult:
-    """Single-page audit: fetch `url`, score it, compose the result.
-
-    `render=True` fetches the page content through headless Chromium
-    (see core.render_fetcher) instead of a plain HTTP GET — use this for
-    React/Vue/SPA sites where the server-delivered HTML is just an empty
-    shell. All auxiliary checks (robots.txt, exposed-path probes, sameAs
-    reachability) still use a plain SafeFetcher regardless of `render`,
-    since rendering those is unnecessary overhead.
-
-    `render_wait_until` defaults to "load" rather than Playwright's
-    "networkidle" — ad-heavy or analytics-heavy sites often never go fully
-    idle, which makes networkidle time out on pages that actually loaded
-    fine. Use "networkidle" for SPAs that fetch data asynchronously after
-    the load event, or "domcontentloaded" for a faster, earlier snapshot.
-
-    `render_timeout_seconds` defaults to 30 (Playwright's own default) —
-    raise it for pages with slow third-party ad/analytics loads, which can
-    legitimately vary run-to-run on the same URL.
-    """
     if profile not in _PAGE_DIMENSIONS:
         raise ValueError(f"Unknown profile {profile!r}; choose from {sorted(_PAGE_DIMENSIONS)}")
 
@@ -165,20 +160,6 @@ def run_site_audit(
     page_type_hint: str = "default",
     brand_name: str | None = None,
 ) -> tuple[CompositeResult, dict]:
-    """Site-wide audit: crawl up to `max_pages` same-origin pages, score each,
-    aggregate per-dimension, and compose one site-level result.
-
-    `render=True` crawls and fetches every page through headless Chromium —
-    necessary for SPA sites where both content AND internal links only exist
-    after JS runs. This is significantly slower (a browser launch is not
-    free) and NOT recommended for large `max_pages` on a server-rendered
-    site that doesn't need it. See `run_audit` for `render_wait_until` and
-    `render_timeout_seconds`.
-
-    Returns (result, crawl_meta) where crawl_meta reports pages crawled,
-    failed URLs, and offsite links skipped — useful for sanity-checking the
-    crawl itself before trusting the score.
-    """
     if profile not in _PAGE_DIMENSIONS:
         raise ValueError(f"Unknown profile {profile!r}; choose from {sorted(_PAGE_DIMENSIONS)}")
 
