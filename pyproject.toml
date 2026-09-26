@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "seo-geo-aeo-engine"
-version = "0.3.0"
+version = "0.4.0"
 description = "Consolidated SEO/GEO/AEO audit engine with Supabase-backed prospect and delta tracking"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,13 +17,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-httpx>=0.30", "mypy>=1.10", "ruff>=0.6"]
+dev = ["pytest>=8.0", "pytest-httpx>=0.30", "pytest-cov>=5.0", "mypy>=1.10", "ruff>=0.6"]
 
 [project.scripts]
 seo-geo-aeo = "seo_geo_aeo.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
 
 [tool.ruff]
 line-length = 100

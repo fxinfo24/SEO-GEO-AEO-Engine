@@ -9,6 +9,9 @@ build/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+.coverage
+.coverage.*
+htmlcov/
 
 # Generated audit output — reports are deliverables, not source
 *.pdf

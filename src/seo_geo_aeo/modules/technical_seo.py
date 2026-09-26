@@ -59,27 +59,35 @@ def score_technical_seo(
 
 
 def _score_crawlability(page: ParsedPage, fetcher: SafeFetcher, findings: list[Finding]) -> float:
-    """Score crawlability factors (0-1 scale)."""
+    """Score crawlability factors (0-1 scale).
+
+    Actually checks robots.txt via the passed fetcher — this used to be a
+    no-op (`try: pass except: ...`) that accepted `fetcher` and never called
+    it, silently returning a near-perfect score for a check that never ran.
+    """
     score = 1.0  # Start with perfect score, deduct for issues
-    
-    # Check robots.txt for major issues
+
     try:
-        # This would normally check the site's robots.txt, but for simplicity
-        # we'll use a basic check. In a full implementation, we'd fetch and parse robots.txt.
-        pass
-    except (FetchError, UnsafeURLError):
+        allowed = fetcher.is_allowed(page.url)
+    except (FetchError, UnsafeURLError) as exc:
         findings.append(Finding(
             severity=Severity.MEDIUM,
             title="Could not fetch robots.txt",
-            detail="Unable to retrieve robots.txt to check for crawl directives.",
+            detail=f"Unable to retrieve robots.txt to check for crawl directives: {exc}",
             page_url=page.url,
         ))
-        score -= 0.2
-    
-    # Check for HTTP status codes that affect crawling
-    # (This would require access to the fetch result, which we don't have here)
-    # For now, we'll rely on other signals
-    
+        return max(0.0, score - 0.2)
+
+    if not allowed:
+        findings.append(Finding(
+            severity=Severity.CRITICAL,
+            title="Page disallowed by robots.txt",
+            detail="robots.txt blocks this URL for this fetcher's user agent — the page "
+            "cannot be crawled at all under current directives.",
+            page_url=page.url,
+        ))
+        score = 0.0
+
     return max(0.0, score)
 
 

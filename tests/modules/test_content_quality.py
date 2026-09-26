@@ -100,3 +100,46 @@ def test_score_content_quality_good_content():
     # Should have a decent score with good content elements
     assert result.score > 40.0
     assert isinstance(result.findings, list)
+
+
+def test_no_first_person_language_produces_finding():
+    """Regression test: this branch used to be dead code (`if matches == 0`
+    nested inside `if matches > 0`), so the finding could never fire no
+    matter how third-person the content was."""
+    heading = HeadingBlock(
+        level=2,
+        text="What is SEO?",
+        following_text=(
+            "Search engine optimization is a marketing discipline focused on growing "
+            "visibility in organic search results. The process involves technical and "
+            "creative elements required to improve rankings, drive traffic, and increase "
+            "awareness in search engines."
+        ),
+    )
+    page = ParsedPage(
+        url="https://example.com",
+        title="SEO Overview",
+        meta_description=None,
+        canonical=None,
+        robots_meta=None,
+        h1_count=1,
+        headings=[heading],
+        word_count=60,
+        schema_blocks=[],
+        images_total=0,
+        images_missing_alt=0,
+        internal_links=[],
+        external_links=[],
+        open_graph={},
+        has_viewport_meta=False,
+        author_byline_present=False,
+        published_date=None,
+        modified_date=None,
+        raw_html="<html><body><h2>What is SEO?</h2><p>Search engine optimization is a marketing discipline.</p></body></html>",
+    )
+
+    result = score_content_quality(page)
+
+    assert any(
+        f.title == "Limited first-person or experiential language" for f in result.findings
+    ), "Expected the no-first-person finding to fire for entirely third-person content"

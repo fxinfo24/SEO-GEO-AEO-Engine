@@ -29,12 +29,22 @@ class Finding:
 
 @dataclass
 class DimensionScore:
-    """Result of one scoring module (e.g. 'ai_citability', 'schema')."""
+    """Result of one scoring module (e.g. 'ai_citability', 'schema').
+
+    `measured` defaults to True. A module sets it False when it could not
+    actually perform its check (no API key, external service unreachable,
+    etc.) — `score` is then ignored by `CompositeScorer.combine()`, which
+    excludes the dimension from weighting entirely rather than letting an
+    arbitrary placeholder number (0.0, 50.0, ...) masquerade as a real
+    measurement. `unmeasured_reason` should say why in one sentence.
+    """
 
     dimension: str
     score: float  # 0-100
     findings: list[Finding] = field(default_factory=list)
     raw: dict = field(default_factory=dict)  # module-specific debug data
+    measured: bool = True
+    unmeasured_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.score <= 100:
@@ -43,10 +53,36 @@ class DimensionScore:
 
 @dataclass
 class CompositeResult:
+    """Weighted profile result with explicit measurement-coverage metadata.
+
+    `weights` holds only the dimensions actually used to compute
+    `overall_score` (present in dimension_scores AND measured=True).
+    `declared_weights` is the profile's full weight table, for comparison —
+    a caller can always tell exactly how much of the declared rubric was
+    real versus how much was excluded, rather than the score silently
+    representing 100% renormalized confidence over a partial measurement.
+    """
+
     profile: str
     overall_score: float
     dimension_scores: dict[str, DimensionScore]
     weights: dict[str, float]
+    declared_weights: dict[str, float]
+
+    @property
+    def measured_weight(self) -> float:
+        """Fraction (0-1) of the declared profile weight actually measured."""
+        return round(sum(self.weights.values()), 4)
+
+    @property
+    def unmeasured_weight(self) -> float:
+        return round(1.0 - self.measured_weight, 4)
+
+    @property
+    def unmeasured_dimensions(self) -> list[str]:
+        """Declared dimensions that did not contribute to overall_score,
+        whether because no module ran or the module reported measured=False."""
+        return sorted(set(self.declared_weights) - set(self.weights))
 
     @property
     def findings(self) -> list[Finding]:
@@ -154,11 +190,16 @@ class CompositeScorer:
         self.weights = weights or PROFILE_WEIGHTS[profile]
 
     def combine(self, dimension_scores: dict[str, DimensionScore]) -> CompositeResult:
-        applicable = {k: v for k, v in self.weights.items() if k in dimension_scores}
+        applicable = {
+            k: v
+            for k, v in self.weights.items()
+            if k in dimension_scores and dimension_scores[k].measured
+        }
         if not applicable:
             raise ValueError(
                 f"None of the scored dimensions {list(dimension_scores)} match profile "
-                f"{self.profile!r} weights {list(self.weights)}"
+                f"{self.profile!r} weights {list(self.weights)}, or all matches were "
+                f"unmeasured"
             )
         weight_sum = sum(applicable.values())
         overall = sum(
@@ -169,4 +210,5 @@ class CompositeScorer:
             overall_score=round(overall, 1),
             dimension_scores=dimension_scores,
             weights=applicable,
+            declared_weights=dict(self.weights),
         )

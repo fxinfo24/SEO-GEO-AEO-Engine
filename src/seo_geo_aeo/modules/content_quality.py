@@ -103,13 +103,13 @@ def _score_originality(page: ParsedPage, findings: list[Finding]) -> float:
     first_person_matches = len(first_person_pattern.findall(" ".join(h.following_text for h in page.headings)))
     if first_person_matches > 0:
         score += min(first_person_matches * 0.05, 0.2)  # Up to 0.2 bonus
-        if first_person_matches == 0:
-            findings.append(Finding(
-                severity=Severity.LOW,
-                title="Limited first-person or experiential language",
-                detail="Content may lack original insights or personal experience that adds unique value.",
-                page_url=page.url,
-            ))
+    else:
+        findings.append(Finding(
+            severity=Severity.LOW,
+            title="Limited first-person or experiential language",
+            detail="Content may lack original insights or personal experience that adds unique value.",
+            page_url=page.url,
+        ))
     
     # Check for specific data, examples, case studies
     # Look for statistics, specific numbers, dates, measurements

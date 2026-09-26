@@ -2,8 +2,8 @@
 
 A deterministic Python engine that audits a URL (or a crawled site) for visibility across
 traditional search (**SEO**), AI answer engines (**GEO** — Generative Engine Optimization),
-and answer/voice assistants (**AEO**). One fetch, one parse, six scoring dimensions,
-markdown + PDF output, optional Supabase-backed history.
+and answer/voice assistants (**AEO**). One fetch, one parse, scoring dimensions per
+profile, markdown + PDF output, optional Supabase-backed history.
 
 Repo: https://github.com/fxinfo24/SEO-GEO-AEO-Engine
 
@@ -11,18 +11,21 @@ Repo: https://github.com/fxinfo24/SEO-GEO-AEO-Engine
 
 ## Read this first: what this actually is
 
-This is **v0.3 of a working tool with real, verifiable gaps.** It is not a finished
-product, it has never been used against a paying client, and parts of it have never
-executed successfully even once. Everything below is stated plainly so you can decide
-what to trust.
+This is **v0.4 of a working tool with real, verifiable gaps.** It has never been used
+against a paying client. Everything below is stated plainly so you can decide what to
+trust — including things found by auditing this project's own code against its own
+claims, not just things found on live sites.
 
 **What genuinely works, verified against live sites:**
 
 - Fetching, parsing, and scoring real pages — plain HTTP and headless Chromium
-- The six scoring modules produce real, deterministic numbers from real page data
+- All scoring modules produce real, deterministic numbers from real page data
 - Multi-page same-origin crawling with cross-page finding deduplication
 - Markdown and PDF report generation, single-profile and combined multi-profile
 - SSRF protection on every request, including sub-resources of rendered pages
+- A `measured`/`unmeasured` mechanism: a dimension that couldn't actually run (no API
+  key, external call failed) is excluded from the composite score entirely, rather than
+  contributing a placeholder number that looks like a real measurement
 
 **What has never been run successfully, not even once:**
 
@@ -31,32 +34,41 @@ what to trust.
   `storage/supabase_client.py` is untested against a real database.** It compiles. That
   is all anyone can currently claim about it.
 
-**What does not exist:**
+**What exists but is thin:**
 
-- **Tests. There are zero.** `tests/` is an empty directory. `pytest` is declared as a
-  dev dependency and has never been run. Every "verified" claim in this README comes
-  from manual runs against live sites during development, not from a suite you can
-  re-run. Treat refactors accordingly.
+- **39 tests, 33% line coverage.** Real, and a real improvement from zero — but most of
+  that coverage sits in a handful of modules (`geo_citability` 93%, `technical_seo` 91%,
+  `scoring` 82%, `content_quality` 69%). `cli.py`, `render_fetcher.py`, `pdf_report.py`,
+  `storage/`, `eeat.py`, `geo_schema.py`, `brand_authority.py`,
+  `platform_optimization.py`, and `seo_technical.py` have **zero** automated test
+  coverage. Every "verified" claim about those still means "manually run against a live
+  site during development," not "covered by a test you can re-run."
 
 ---
 
 ## The scores are not what they look like
 
 This is the single most important thing to understand before showing anyone a number
-from this tool.
+from this tool. It was also the thing most wrong about this file until this pass — an
+earlier version of this README claimed AEO was 85% covered and SEO was 40% covered.
+Both numbers were correct when written and **stale by the time you'd have read them**,
+because a separate work session had already added `technical_seo.py`, `content_quality.py`,
+and `live_citation.py` without the README being updated to match. That gap — code moving
+faster than its own documentation — is exactly the kind of thing this section exists to
+prevent from happening silently again.
 
-Each profile declares a set of weighted dimensions. Not all of those dimensions have a
-module behind them. `CompositeScorer` renormalizes over whatever actually ran — which
-means **a profile can return a confident-looking `/100` while silently measuring only a
-fraction of what it claims to measure.**
+Each profile declares a set of weighted dimensions. `CompositeScorer` renormalizes over
+whatever actually ran, so a profile can return a confident `/100` while measuring less
+than it claims — unless coverage is 100% and nothing gets discarded.
 
-Actual coverage, machine-verified against the code:
+Actual coverage, machine-verified, with an automated test (`tests/core/test_dimension_coverage.py`)
+that now fails the build if this table goes stale again:
 
-| Profile | Declared weight actually backed by a module | Declared but never produced | Computed then discarded |
+| Profile | Declared weight backed by a real module | Never produced | Computed then discarded |
 |---|---|---|---|
 | **GEO** | **100%** | — | — |
-| **AEO** | **85%** | `live_citation` (15%) | `platform_optimization` |
-| **SEO** | **40%** | `technical_seo` (35%), `content_quality` (25%) | — |
+| **AEO** | **100%** | — | — |
+| **SEO** | **100%** | — | — |
 
 Reproduce it yourself:
 
@@ -70,25 +82,58 @@ for p in ('seo','aeo','geo'):
 "
 ```
 
-**What this means in practice:**
+**Coverage being 100% is not the same as quality being uniform.** Read the next section —
+one dimension in particular (`live_citation`) is real, wired in, and still something you
+should not treat as authoritative.
 
-- **GEO is the only profile you should quote as-is.** All six of its dimensions are real.
-- **AEO is close** — it's missing live citation testing (actually querying ChatGPT/
-  Perplexity to see whether the page gets cited), which is the entire point of the "AEO"
-  label. It also computes `platform_optimization` and then throws it away, because that
-  dimension isn't in the AEO weight table. That's wasted work and an inconsistency, not
-  a design decision.
-- **SEO is the weakest and most misleading.** A "66.9/100 SEO score" is really an
-  on-page + schema score wearing an SEO label. Core crawlability, indexability, Core Web
-  Vitals, and content-quality analysis — 60% of what the profile claims to weigh — do not
-  exist as modules. `seo_technical.py` exists and is decent, but it registers under
-  `on_page`, not `technical_seo`.
+## `live_citation`: read this before trusting the number
 
-Fixing this means either building the missing modules or honestly rewriting the weight
-tables to match reality. Until one of those happens, the SEO number should not go in
-front of a client.
+Despite the name, this dimension does **not** test whether ChatGPT, Perplexity, or any
+other AI system has actually cited the page. It sends page content to an LLM (via
+OpenRouter, currently a specific free model) and asks it to *guess* a 0-100
+citation-likelihood score. That's a model opinion about the page, not an observation of
+real-world citation behavior. A genuine live-citation test would need a fixed query set,
+real answer-engine API calls, URL extraction from real responses, and repeated runs to
+account for nondeterminism — none of that exists.
 
----
+It was also, until this pass, silently broken in a specific way: with no
+`OPENROUTER_API_KEY` set, it returned a **fake score of `0.0`** that fed directly into
+the AEO composite as if "no citation potential" had been measured. If the API call
+failed, it returned a **fake `50.0`** "neutral" score, equally fabricated. Both have been
+replaced with `measured=False` — the dimension is now excluded from the composite
+entirely when it can't actually run, with the reason recorded in
+`unmeasured_reason`. This is the general pattern (`DimensionScore.measured`,
+`CompositeResult.unmeasured_dimensions`) that should be used everywhere a check might not
+be able to run, not just here.
+
+**Privacy note:** page content (title, meta description, up to ~1500 chars of
+heading/body text) is sent to a third-party API for every audit that includes this
+dimension. There is no opt-out beyond unsetting `OPENROUTER_API_KEY`, and no redaction.
+Do not run this against pages containing anything sensitive.
+
+## Bugs found and fixed while implementing this pass
+
+These were real, in the codebase, silently producing wrong numbers. Listed because
+knowing what kind of bug this project tends to produce is more useful than a vague
+"tests were added" claim.
+
+1. **`technical_seo._score_crawlability` was a no-op.** It accepted a `fetcher` argument
+   and never called it — a `try/except` wrapped a bare `pass`, with a comment admitting
+   "for simplicity." It always returned a near-perfect score for a robots.txt check that
+   never happened. Now it actually calls `fetcher.is_allowed()`.
+2. **`content_quality._score_originality` had unreachable dead code.** The "no
+   first-person language" finding was nested inside `if first_person_matches > 0:` but
+   itself checked `if first_person_matches == 0:` — a contradiction that could never be
+   true. The finding could never fire, no matter how third-person the content was. Fixed
+   by de-nesting the condition.
+3. **`live_citation` returned fabricated scores instead of "unmeasured."** Covered above.
+4. **AEO computed `platform_optimization` and threw it away every time** — it ran real
+   network calls (schema/sameAs checks) for a dimension not present in
+   `PROFILE_WEIGHTS["aeo"]`, so `CompositeScorer.combine()` silently discarded the
+   result. Removed from AEO's dimension list rather than added to its weight table, since
+   the 10% GEO weight for that dimension was never validated for AEO specifically.
+
+All four are now covered by regression tests that fail if the bug is reintroduced.
 
 ## Why it exists
 
@@ -105,10 +150,12 @@ rubrics themselves were well-sourced (Ahrefs Dec 2025, Princeton/Georgia Tech GE
 research, Google's Dec 2025 Quality Rater Guidelines). The execution was prose.
 
 So the rubrics got ported into deterministic Python: same page in, same score out, every
-time, with history you can diff. That part of the premise holds. The part where all
-three profiles are equally complete does not yet — see above.
+time, with history you can diff. That part of the premise holds.
 
 ## What it measures
+
+GEO profile weights shown; SEO and AEO have their own weight tables in
+`core/scoring.py::PROFILE_WEIGHTS`.
 
 | Dimension | What it checks | GEO weight |
 |---|---|---|
@@ -119,23 +166,32 @@ three profiles are equally complete does not yet — see above.
 | Schema | JSON-LD coverage, Organization/Person entity graph, deprecated types | 10% |
 | Platform Optimization | Per-platform readiness for Google AIO, ChatGPT, Perplexity, Gemini, Bing Copilot | 10% |
 
+AEO additionally weighs `live_citation` (15%, see caveats above) and drops
+`platform_optimization`. SEO uses `technical_seo`, `on_page`, `content_quality`, and
+`schema` — the first and third are the modules added in the Sep 20 session and are
+**not yet covered by the bug-hunting pass this README documents beyond the two fixes
+listed above.** Assume they have not been fully audited.
+
 ## Install
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 playwright install chromium        # only if you need --render
-cp .env.example .env               # only if you want --save/compare/prospects
+cp .env.example .env               # only if you want --save/compare/prospects, or live_citation
 ```
 
 Python 3.12 is what this is developed and run on. **3.14 does not work** — `pydantic-core`
 (a Supabase dependency) has no 3.14 wheel and falls back to a Rust source build that
-hangs indefinitely. This cost an hour to diagnose; use 3.12.
+hangs indefinitely. This cost an hour to diagnose; use 3.12. CI is pinned to 3.12 for
+the same reason.
+
+Run the tests: `pytest -v --cov=seo_geo_aeo --cov-report=term-missing`
 
 ## Usage
 
 ```bash
-# Single page, GEO profile (the one to trust)
+# Single page
 seo-geo-aeo audit https://example.com --profile geo
 
 # SPA / React site — server HTML is an empty shell without this
@@ -191,7 +247,7 @@ tool failure.
 
 **`--render` is slow.** Browser launch plus JS execution is seconds per page. A combined
 three-profile `report --render` run on one URL took ~8 minutes, because each profile
-re-fetches independently. Don't run `--pages 50 --render` casually.
+re-fetches independently — this is a known inefficiency, not yet fixed (see Status).
 
 ## What it cannot measure, and does not pretend to
 
@@ -207,28 +263,27 @@ number:
   site with three dead social links and zero mentions scores identically to one with an
   active community, as long as the URLs return 200.
 - **Follower/subscriber counts**
-- **Live AI citation testing** — nothing here queries ChatGPT or Perplexity to check
-  whether a page is cited in practice. This is the `live_citation` gap that makes the
-  AEO profile 85% rather than complete.
+- **Genuine live AI citation testing** — see the `live_citation` section above
 - **Real client-side render performance** — only server response time is captured
 - **IndexNow / Bing WMT / Knowledge Panel / Google Business Profile status**
 
 `platform_optimization` deserves a specific caveat: the source rubric's heaviest weights
 were ranking position and community discussion volume, neither of which is obtainable
-here. What remains is a proxy built from on-page signals and declared social presence. It
-is directionally useful and it is not the rubric it was ported from.
+here. What remains is a proxy built from on-page signals and declared social presence.
 
 ## How it differs from commercial tools
 
 Honestly: it's narrower, it's free, it's yours, and it shows its work.
 
-- **Deterministic.** Same page, same score, twice. No LLM re-deriving a rubric per run,
-  so no drift to explain away.
+- **Deterministic.** Same page, same score, twice. No LLM re-deriving a rubric per run
+  for the six original dimensions — `live_citation` is the one exception, and it's
+  labeled as such.
 - **One data model across three profiles**, so a fix's effect on all three is visible at
   once — rather than three subscriptions with three incompatible scales.
-- **Explicit about gaps.** The `unmeasured` lists and the coverage table above are the
-  differentiator. Commercial tools in this space either charge for that data or quietly
-  paper over its absence.
+- **Explicit about gaps**, including its own. The coverage table, the `unmeasured` lists,
+  and the "bugs found and fixed" section above are the differentiator. Commercial tools
+  in this space either charge for the missing data or quietly paper over its absence —
+  and, presumably, don't publish their own bug list.
 - **SSRF-guarded by default.** Every fetch resolves DNS and rejects loopback, private,
   link-local, and reserved ranges before connecting; re-validates after redirects; and
   applies the identical check to every sub-resource a rendered page requests. None of the
@@ -236,7 +291,7 @@ Honestly: it's narrower, it's free, it's yours, and it shows its work.
 - **Self-hosted.** Your Python, your Supabase project, no per-audit metering.
 
 What commercial tools have that this doesn't: rank tracking, backlink indexes, real
-citation monitoring, test coverage, and a support contract.
+citation monitoring, mature test coverage, and a support contract.
 
 ## Architecture
 
@@ -244,28 +299,36 @@ citation monitoring, test coverage, and a support contract.
 src/seo_geo_aeo/
 ├── core/
 │   ├── fetcher.py         # SSRF-guarded, robots.txt-aware HTTP fetcher
-│   ├── render_fetcher.py  # Headless Chromium; same SSRF guard per sub-request
-│   ├── crawler.py         # Same-origin BFS crawl, page-budgeted
-│   ├── parser.py          # HTML → structured page data + JSON-LD extraction
-│   ├── scoring.py         # Weighted composite scorer, cross-page aggregation
-│   └── orchestrator.py    # fetch → parse → modules → composite
-├── modules/               # The six scoring dimensions + seo_technical
-├── reporting/             # markdown_report, pdf_report (single + comprehensive)
-└── storage/               # supabase_client — compiles, never executed live
+│   ├── render_fetcher.py  # Headless Chromium; same SSRF guard per sub-request (0% test coverage)
+│   ├── crawler.py         # Same-origin BFS crawl, page-budgeted (25% coverage)
+│   ├── parser.py          # HTML → structured page data + JSON-LD extraction (30% coverage)
+│   ├── scoring.py         # Weighted composite scorer, measured/unmeasured, aggregation (82% coverage)
+│   └── orchestrator.py    # fetch → parse → modules → composite (23% coverage)
+├── modules/                # 9 scoring modules; coverage ranges 0%-93%, see Install
+├── reporting/               # markdown_report, pdf_report (0% coverage)
+└── storage/                 # supabase_client — compiles, never executed live, 0% coverage
 ```
 
 ## Status
 
-v0.3. Working tool, honest gaps, no test suite, Supabase path unproven.
+v0.4. All three profiles now measure 100% of what they declare; a test suite and CI now
+exist; four real scoring bugs were found and fixed while getting here. Still true: no
+live Supabase run, thin test coverage outside a handful of modules, and `RoadMap.md` in
+this repo has a longer list of architectural work (shared-fetch refactor across
+profiles, Postgres/Neon evaluation, security hardening depth, full per-module fixture
+suite) that this pass did not attempt — it's a multi-session plan, not a checklist one
+pass clears.
 
-Roadmap, in the order that would matter most:
+Next, in the order that would matter most:
 
-1. **Write tests.** Nothing else should ship first.
-2. **Fix the SEO profile** — build `technical_seo` and `content_quality`, or rewrite the
-   weight table to stop claiming them.
-3. **Run the Supabase path once** with a real key and find out what breaks.
-4. Resolve the AEO `platform_optimization` compute-then-discard inconsistency.
-5. `live_citation` module, if a reliable way to test AI citation exists.
-6. Share one fetch across profiles in `report` instead of re-fetching per profile.
+1. **Run the Supabase path once** with a real key and find out what breaks.
+2. **Extend test coverage** to the zero-coverage modules listed above, starting with
+   `orchestrator.py` and `crawler.py` since they're the load-bearing glue.
+3. **Audit `technical_seo.py` and `content_quality.py`** as thoroughly as this pass
+   audited the rest — they're new, coverage on them is real but partial, and this pass
+   only caught the two bugs it happened to hit, not necessarily all of them.
+4. Share one fetch across profiles in `report` instead of re-fetching per profile.
+5. Decide whether `live_citation`'s LLM-guess approach is worth keeping, replacing with a
+   real citation test, or removing.
 
 MIT-licensed dependencies; the source skills were Apache-2.0 and MIT.

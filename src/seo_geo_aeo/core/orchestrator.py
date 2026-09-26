@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 _PAGE_DIMENSIONS = {
     "geo": ("schema", "ai_citability", "content_eeat", "brand_authority", "platform_optimization"),
     "seo": ("technical_seo", "on_page", "content_quality", "schema"),
-    "aeo": ("schema", "ai_citability", "content_eeat", "brand_authority", "platform_optimization", "live_citation"),
+    # platform_optimization deliberately excluded here: it is not in
+    # PROFILE_WEIGHTS["aeo"], so computing it for AEO ran real network calls
+    # (schema/sameAs-derived checks) whose result CompositeScorer.combine()
+    # then discarded every time. Removed rather than "fixed" by adding it to
+    # the weight table, since its 10% GEO weight was never validated for AEO.
+    "aeo": ("schema", "ai_citability", "content_eeat", "brand_authority", "live_citation"),
 }
 _DOMAIN_DIMENSIONS = {
     "geo": ("technical_geo",),
