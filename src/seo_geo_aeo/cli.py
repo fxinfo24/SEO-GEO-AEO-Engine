@@ -19,7 +19,7 @@ import sys
 from urllib.parse import urlparse
 
 from seo_geo_aeo.core.fetcher import FetchError, SafeFetcher, UnsafeURLError
-from seo_geo_aeo.core.orchestrator import run_audit, run_site_audit
+from seo_geo_aeo.core.orchestrator import run_audit, run_profiles, run_site_audit
 from seo_geo_aeo.core.scoring import CompositeResult
 from seo_geo_aeo.reporting.markdown_report import render_markdown_report
 from seo_geo_aeo.storage.supabase_client import AuditStore, ProspectRecord, SupabaseConfigError
@@ -113,9 +113,13 @@ def cmd_report(args: argparse.Namespace) -> int:
     domain = args.domain or _domain_from_url(args.url)
 
     results: dict[str, CompositeResult] = {}
-    for profile in profiles:
-        try:
-            if args.pages > 1:
+    if args.pages > 1:
+        # Multi-page site audit: each profile still crawls independently.
+        # Sharing fetched pages across profiles here would need a
+        # SiteAuditContext (RoadMap.md Phase 7.1) that isn't built yet —
+        # tracked as follow-up, not silently pretended to be solved.
+        for profile in profiles:
+            try:
                 result, crawl_meta = run_site_audit(
                     args.url,
                     profile=profile,
@@ -131,22 +135,32 @@ def cmd_report(args: argparse.Namespace) -> int:
                     f"{len(crawl_meta['failed_urls'])} failed",
                     file=sys.stderr,
                 )
-            else:
-                result = run_audit(
-                    args.url,
-                    profile=profile,
-                    render=args.render,
-                    render_wait_until=args.wait_until,
-                    render_timeout_seconds=args.timeout,
-                    fetcher=fetcher,
-                    brand_name=args.brand_name,
-                )
-            results[profile] = result
-            print(f"[{profile}] {result.overall_score}/100 ({result.rating()})", file=sys.stderr)
+                results[profile] = result
+                print(f"[{profile}] {result.overall_score}/100 ({result.rating()})", file=sys.stderr)
+            except UnsafeURLError as exc:
+                print(f"[{profile}] refused: {exc}", file=sys.stderr)
+            except FetchError as exc:
+                print(f"[{profile}] fetch failed: {exc}", file=sys.stderr)
+    else:
+        # Single page: fetch and parse once, score every requested profile
+        # from that one shared page (RoadMap.md Phase 7) instead of
+        # re-fetching per profile.
+        try:
+            results = run_profiles(
+                args.url,
+                profiles=profiles,
+                render=args.render,
+                render_wait_until=args.wait_until,
+                render_timeout_seconds=args.timeout,
+                fetcher=fetcher,
+                brand_name=args.brand_name,
+            )
+            for profile, result in results.items():
+                print(f"[{profile}] {result.overall_score}/100 ({result.rating()})", file=sys.stderr)
         except UnsafeURLError as exc:
-            print(f"[{profile}] refused: {exc}", file=sys.stderr)
+            print(f"Refused: {exc}", file=sys.stderr)
         except FetchError as exc:
-            print(f"[{profile}] fetch failed: {exc}", file=sys.stderr)
+            print(f"Fetch failed: {exc}", file=sys.stderr)
 
     if not results:
         print("All profile audits failed; no report generated.", file=sys.stderr)
