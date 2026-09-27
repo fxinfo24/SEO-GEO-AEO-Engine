@@ -100,6 +100,22 @@ class RenderFetcher:
         except UnsafeURLError:
             return False
 
+    def _handle_route(self, route: object, request: object, blocked_urls: list[str]) -> None:
+        """Decide whether to allow or abort one Playwright-intercepted
+        request. Pulled out of `fetch()` as its own method (rather than a
+        closure) so this SSRF-relevant decision can be unit tested with
+        duck-typed `route`/`request` stand-ins, without needing a real
+        Chromium binary — `page.route("**/*", handler)` calls this with
+        Playwright's real Route/Request objects, but the only interface it
+        needs is `request.url` and `route.abort()` / `route.continue_()`.
+        """
+        url = request.url  # type: ignore[attr-defined]
+        if not self._validate_request_url(url):
+            blocked_urls.append(url)
+            route.abort()  # type: ignore[attr-defined]
+        else:
+            route.continue_()  # type: ignore[attr-defined]
+
     def close(self) -> None:
         if self._browser is not None:
             self._browser.close()
@@ -131,15 +147,7 @@ class RenderFetcher:
         page = context.new_page()
 
         blocked_urls: list[str] = []
-
-        def _route_handler(route, request):  # type: ignore[no-untyped-def]
-            if not self._validate_request_url(request.url):
-                blocked_urls.append(request.url)
-                route.abort()
-            else:
-                route.continue_()
-
-        page.route("**/*", _route_handler)
+        page.route("**/*", lambda route, request: self._handle_route(route, request, blocked_urls))
 
         try:
             response = page.goto(

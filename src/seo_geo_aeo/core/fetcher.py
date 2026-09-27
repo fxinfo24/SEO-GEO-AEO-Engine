@@ -140,12 +140,22 @@ class SafeFetcher:
     def fetch(self, url: str, *, respect_robots_override: bool | None = None) -> FetchResult:
         """Fetch `url`, enforcing SSRF checks, robots.txt, and per-host rate limiting.
 
+        Redirects are followed manually, one hop at a time, validating each
+        `Location` target BEFORE it is requested. `follow_redirects=True`
+        would let httpx send the request to a redirect's destination before
+        any final-URL check ran, so a malicious 302 to a cloud metadata IP
+        (169.254.169.254) or other internal host would already have been
+        contacted by the time that check raised. Pre-hop validation closes
+        that gap: an unsafe redirect target is never requested at all.
+
         Raises
         ------
         UnsafeURLError
-            If the URL is malformed or resolves to a non-public address.
+            If the URL is malformed, resolves to a non-public address, or a
+            redirect hop in the chain points at one.
         FetchError
-            If robots.txt disallows the fetch, or the HTTP request itself fails.
+            If robots.txt disallows the fetch, the redirect chain exceeds
+            `max_redirects`, or the HTTP request itself fails.
         """
         hostname = self._validate_url(url)
 
@@ -158,23 +168,33 @@ class SafeFetcher:
         self._throttle(hostname)
 
         start = time.monotonic()
+        current_url = url
+        max_redirects = 10
         try:
             with httpx.Client(
-                follow_redirects=True,
+                follow_redirects=False,
                 timeout=self.timeout_seconds,
                 headers={"User-Agent": self.user_agent},
             ) as client:
-                response = client.get(url)
+                for _ in range(max_redirects + 1):
+                    response = client.get(current_url)
+                    if not response.is_redirect:
+                        break
+                    location = response.headers.get("location")
+                    if not location:
+                        break
+                    next_url = urljoin(current_url, location)
+                    self._validate_url(next_url)
+                    current_url = next_url
+                else:
+                    raise FetchError(f"Too many redirects ({max_redirects}) fetching {url}")
         except httpx.HTTPError as exc:
             raise FetchError(f"HTTP error fetching {url}: {exc}") from exc
         elapsed = time.monotonic() - start
 
-        # Re-validate the final URL in case a redirect pointed at internal infra.
-        self._validate_url(str(response.url))
-
         return FetchResult(
             url=url,
-            final_url=str(response.url),
+            final_url=current_url,
             status_code=response.status_code,
             headers=dict(response.headers),
             text=response.text,
