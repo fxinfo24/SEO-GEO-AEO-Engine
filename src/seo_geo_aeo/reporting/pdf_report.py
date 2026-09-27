@@ -73,6 +73,17 @@ def _build_styles() -> dict[str, ParagraphStyle]:
     }
 
 
+def _coverage_text(result: CompositeResult) -> str:
+    """Mirrors markdown_report._coverage_line — see its docstring for why
+    this exists. Both renderers must show this; neither is allowed to omit
+    it in favor of the other."""
+    pct = f"{result.measured_weight:.0%}"
+    if result.unmeasured_weight <= 0:
+        return f"Measured coverage: {pct} of declared dimensions"
+    dims = ", ".join(result.unmeasured_dimensions)
+    return f"Measured coverage: {pct} of declared dimensions (unmeasured: {dims})"
+
+
 def _score_card(profile: str, result: CompositeResult, styles: dict[str, ParagraphStyle]) -> Table:
     """One profile's score as a compact colored card, used in the summary row."""
     rating_color = _RATING_COLOR.get(result.rating(), colors.black)
@@ -81,10 +92,14 @@ def _score_card(profile: str, result: CompositeResult, styles: dict[str, Paragra
     rating_style = ParagraphStyle(
         "CardRating", parent=styles["body"], alignment=1, textColor=rating_color, fontSize=10
     )
+    coverage_style = ParagraphStyle(
+        "CardCoverage", parent=styles["small"], alignment=1, fontSize=7.5
+    )
     cell = [
         [Paragraph(f"<b>{_PROFILE_LABEL[profile]}</b>", label_style)],
         [Paragraph(f"{result.overall_score}", score_style)],
         [Paragraph(f"/100 · {result.rating()}", rating_style)],
+        [Paragraph(f"{result.measured_weight:.0%} measured", coverage_style)],
     ]
     table = Table(cell, colWidths=[2.0 * inch])
     table.setStyle(
@@ -103,25 +118,36 @@ def _score_card(profile: str, result: CompositeResult, styles: dict[str, Paragra
 
 
 def _breakdown_table(result: CompositeResult) -> Table:
-    rows = [["Dimension", "Score", "Weight"]]
+    rows = [["Dimension", "Score", "Weight", "Status"]]
     for dim, weight in sorted(result.weights.items(), key=lambda kv: -kv[1]):
         ds = result.dimension_scores[dim]
-        rows.append([dim.replace("_", " ").title(), f"{ds.score}/100", f"{weight:.0%}"])
-    table = Table(rows, colWidths=[3.2 * inch, 1.5 * inch, 1.5 * inch])
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f4f6")]),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]
+        rows.append([dim.replace("_", " ").title(), f"{ds.score}/100", f"{weight:.0%}", "Measured"])
+    for dim in result.unmeasured_dimensions:
+        declared_weight = result.declared_weights.get(dim, 0.0)
+        ds = result.dimension_scores.get(dim)
+        reason = ds.unmeasured_reason if ds and ds.unmeasured_reason else "not produced"
+        rows.append(
+            [dim.replace("_", " ").title(), "—", f"{declared_weight:.0%}", f"Not measured — {reason}"]
         )
-    )
+    table = Table(rows, colWidths=[2.4 * inch, 1.0 * inch, 1.0 * inch, 1.8 * inch])
+    row_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]
+    n_measured = len(result.weights)
+    for i in range(1, len(rows)):
+        if i <= n_measured:
+            row_styles.append(("BACKGROUND", (0, i), (-1, i),
+                                colors.white if i % 2 else colors.HexColor("#f3f4f6")))
+        else:
+            row_styles.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fef3c7")))
+            row_styles.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#78716c")))
+    table.setStyle(TableStyle(row_styles))
     return table
 
 
@@ -177,6 +203,11 @@ def render_pdf_report(domain: str, result: CompositeResult, output_path: str) ->
         Paragraph(
             f'<para alignment="center"><font color="{rating_color.hexval()}"><b>{result.rating()}</b></font></para>',
             styles["body"],
+        )
+    )
+    story.append(
+        Paragraph(
+            f'<para alignment="center">{_coverage_text(result)}</para>', styles["small"]
         )
     )
     story.append(Spacer(1, 0.3 * inch))
@@ -282,6 +313,7 @@ def render_comprehensive_pdf_report(
                 styles["body"],
             )
         )
+        story.append(Paragraph(_coverage_text(result), styles["small"]))
         story.append(Spacer(1, 0.2 * inch))
 
         story.append(Paragraph("Score Breakdown", styles["h3"]))
