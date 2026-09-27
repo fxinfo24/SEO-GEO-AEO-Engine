@@ -1,14 +1,15 @@
 """
-Live Citation scoring module.
+AI Citation Likelihood scoring module.
 
-Honest naming caveat: despite the dimension name "live_citation", this does
-NOT test whether ChatGPT, Perplexity, Gemini, or any other AI system has
-actually cited this URL. It sends page content to an LLM via OpenRouter and
-asks it to *guess* a 0-100 citation-likelihood score. That is a model
-opinion, not an observation — treat it accordingly. A genuine live-citation
-test would need a fixed query set, real answer-engine API calls, URL
-extraction from real responses, and repeated runs to account for
-nondeterminism; none of that exists here.
+Renamed from "live_citation" (RoadMap.md Phase 5.1) because the old name
+implied something this module does not do: it does NOT test whether
+ChatGPT, Perplexity, Gemini, or any other AI system has actually cited
+this URL. It sends page content to an LLM via OpenRouter and asks it to
+*guess* a 0-100 citation-likelihood score. That is a model opinion, not an
+observation — treat it accordingly. A genuine live-citation test would
+need a fixed query set, real answer-engine API calls, URL extraction from
+real responses, and repeated runs to account for nondeterminism; none of
+that exists here.
 
 Privacy note: page content (title, meta description, and up to ~1500 chars
 of heading/body text) is sent to a third-party API (OpenRouter, currently
@@ -147,14 +148,14 @@ Content to evaluate:
                 score=score, response_text_length=len(full_text), extraction_method=method
             )
     except httpx.HTTPError as exc:
-        logger.warning("OpenRouter API call failed for live_citation: %s", exc)
+        logger.warning("OpenRouter API call failed for ai_citation_likelihood: %s", exc)
         return _ApiCallResult(score=None, response_text_length=0, extraction_method="none")
     except Exception as exc:  # noqa: BLE001 - never let a third-party call crash the audit
-        logger.warning("Unexpected error calling OpenRouter for live_citation: %s", exc)
+        logger.warning("Unexpected error calling OpenRouter for ai_citation_likelihood: %s", exc)
         return _ApiCallResult(score=None, response_text_length=0, extraction_method="none")
 
 
-def score_live_citation(page: ParsedPage) -> DimensionScore:
+def score_ai_citation_likelihood(page: ParsedPage) -> DimensionScore:
     """Ask an LLM (via OpenRouter) to estimate this page's AI-citation likelihood.
 
     Returns measured=False (excluded from the composite score entirely) when
@@ -166,14 +167,14 @@ def score_live_citation(page: ParsedPage) -> DimensionScore:
 
     if not api_key:
         return DimensionScore(
-            dimension="live_citation",
+            dimension="ai_citation_likelihood",
             score=0.0,
             measured=False,
-            unmeasured_reason="OPENROUTER_API_KEY not set — live citation check did not run.",
+            unmeasured_reason="OPENROUTER_API_KEY not set — AI citation likelihood check did not run.",
             findings=[
                 Finding(
                     severity=Severity.LOW,
-                    title="Live citation check skipped: no API key",
+                    title="AI citation likelihood check skipped: no API key",
                     detail="Set OPENROUTER_API_KEY to enable this check. Excluded from the "
                     "composite score rather than scored as a default value.",
                     page_url=page.url,
@@ -187,14 +188,14 @@ def score_live_citation(page: ParsedPage) -> DimensionScore:
 
     if api_result.score is None:
         return DimensionScore(
-            dimension="live_citation",
+            dimension="ai_citation_likelihood",
             score=0.0,
             measured=False,
             unmeasured_reason="OpenRouter API call failed or returned no extractable score.",
             findings=[
                 Finding(
                     severity=Severity.LOW,
-                    title="Live citation check failed",
+                    title="AI citation likelihood check failed",
                     detail="Could not reach OpenRouter or extract a score from its response. "
                     "Excluded from the composite score rather than defaulted to neutral.",
                     page_url=page.url,
@@ -230,7 +231,7 @@ def score_live_citation(page: ParsedPage) -> DimensionScore:
     )
 
     return DimensionScore(
-        dimension="live_citation",
+        dimension="ai_citation_likelihood",
         score=round(score, 1),
         findings=findings,
         raw={

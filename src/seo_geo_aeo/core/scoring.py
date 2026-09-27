@@ -127,7 +127,7 @@ PROFILE_WEIGHTS: dict[str, dict[str, float]] = {
         "schema": 0.15,
     },
     "aeo": {
-        "live_citation": 0.15,
+        "ai_citation_likelihood": 0.15,
         "ai_citability": 0.20,
         "brand_authority": 0.20,
         "content_eeat": 0.20,
