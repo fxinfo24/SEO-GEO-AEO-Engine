@@ -1,8 +1,17 @@
-"""Traditional technical/on-page SEO scoring.
+"""On-page SEO + security-header scoring (dimension: "on_page").
 
 Merges seo-technical, seo-page, and the "Technical On-Page" section of the
 standalone SEO-GEO-AEO-Skill.md into one deterministic scorer, plus the
 security checks (headers, exposed-secret paths) that skill defined.
+
+Despite this file's name, this is NOT the `technical_seo` dimension —
+that's `modules.technical_seo.score_technical_seo()` (crawlability,
+indexability, site architecture, mobile-friendliness; RoadMap.md Phase
+3.2). This module covers title/meta/heading/canonical/OG/security-header
+signals scoped to a single page, hence `score_on_page_seo()`. The two
+modules previously both exported a function named `score_technical_seo`,
+which the orchestrator had to alias around (`as score_on_page_factors`) —
+renamed per Phase 3.2 to remove that ambiguity at the source.
 """
 
 from __future__ import annotations
@@ -44,7 +53,7 @@ def _check_exposed_paths(base_url: str, fetcher: SafeFetcher) -> list[Finding]:
     return findings
 
 
-def score_technical_seo(
+def score_on_page_seo(
     page: ParsedPage,
     response_headers: dict[str, str],
     *,

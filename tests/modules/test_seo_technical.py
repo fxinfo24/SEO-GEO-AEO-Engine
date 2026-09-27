@@ -1,17 +1,17 @@
 """
-Tests for `seo_geo_aeo.modules.seo_technical.score_technical_seo` -- the
+Tests for `seo_geo_aeo.modules.seo_technical.score_on_page_seo` -- the
 on-page/security-headers scorer (dimension name: "on_page"). Not to be
 confused with tests/modules/test_technical_seo.py, which covers the
-separate `modules.technical_seo` crawlability module. Per RoadMap.md
-Phase 3.2, the two modules are still confusingly named and the orchestrator
-still aliases this one's function to `score_on_page_factors` -- these tests
-lock in current behavior so an eventual rename doesn't silently change it.
+separate `modules.technical_seo.score_technical_seo` crawlability module
+(dimension: "technical_seo"). Renamed per RoadMap.md Phase 3.2 from a
+same-named `score_technical_seo` that the orchestrator had to alias
+around (`as score_on_page_factors`).
 """
 from __future__ import annotations
 
 from seo_geo_aeo.core.fetcher import FetchError, FetchResult
 from seo_geo_aeo.core.parser import ParsedPage
-from seo_geo_aeo.modules.seo_technical import score_technical_seo
+from seo_geo_aeo.modules.seo_technical import score_on_page_seo
 
 _GOOD_HEADERS = {
     "Strict-Transport-Security": "max-age=63072000",
@@ -68,7 +68,7 @@ def test_minimal_page_scores_low_with_many_findings():
     viewport, no security headers, served over HTTP."""
     page = _make_page(url="http://example.com", title=None)
 
-    result = score_technical_seo(page, {}, fetcher=None, check_exposed_paths=False)
+    result = score_on_page_seo(page, {}, fetcher=None, check_exposed_paths=False)
 
     assert result.dimension == "on_page"
     assert 0.0 <= result.score <= 100.0
@@ -98,7 +98,7 @@ def test_well_formed_page_scores_high():
         raw_html="<html>no mixed refs here</html>",
     )
 
-    result = score_technical_seo(page, _GOOD_HEADERS, fetcher=None, check_exposed_paths=False)
+    result = score_on_page_seo(page, _GOOD_HEADERS, fetcher=None, check_exposed_paths=False)
 
     assert result.score > 80.0
     assert not any(f.title == "Missing security headers" for f in result.findings)
@@ -110,7 +110,7 @@ def test_exposed_env_path_is_critical_and_penalizes_score():
     page = _make_page(title="x" * 40, has_viewport_meta=True)
     fetcher = _StubFetcher(exposed={"/.env"})
 
-    result = score_technical_seo(page, _GOOD_HEADERS, fetcher=fetcher, check_exposed_paths=True)
+    result = score_on_page_seo(page, _GOOD_HEADERS, fetcher=fetcher, check_exposed_paths=True)
 
     assert any(
         f.title == "Exposed sensitive path: /.env" and f.severity.value == "critical"
@@ -122,7 +122,7 @@ def test_exposed_path_check_skipped_when_disabled():
     page = _make_page()
     fetcher = _StubFetcher(exposed={"/.env"})
 
-    result = score_technical_seo(page, {}, fetcher=fetcher, check_exposed_paths=False)
+    result = score_on_page_seo(page, {}, fetcher=fetcher, check_exposed_paths=False)
 
     assert not any(f.title.startswith("Exposed sensitive path") for f in result.findings)
 
@@ -133,7 +133,7 @@ def test_exposed_path_fetch_failure_is_silently_ignored_not_a_crash():
     page = _make_page()
     fetcher = _StubFetcher(raises=FetchError("connection reset"))
 
-    result = score_technical_seo(page, {}, fetcher=fetcher, check_exposed_paths=True)
+    result = score_on_page_seo(page, {}, fetcher=fetcher, check_exposed_paths=True)
 
     assert not any(f.title.startswith("Exposed sensitive path") for f in result.findings)
 
@@ -141,7 +141,7 @@ def test_exposed_path_fetch_failure_is_silently_ignored_not_a_crash():
 def test_missing_security_headers_flagged_with_names():
     page = _make_page()
 
-    result = score_technical_seo(page, {}, fetcher=None, check_exposed_paths=False)
+    result = score_on_page_seo(page, {}, fetcher=None, check_exposed_paths=False)
 
     finding = next(f for f in result.findings if f.title == "Missing security headers")
     assert "strict-transport-security" in finding.detail
@@ -161,7 +161,7 @@ def test_score_never_exceeds_100():
         open_graph={"og:title": "T", "og:description": "D", "og:image": "https://example.com/i.png"},
     )
 
-    result = score_technical_seo(page, _GOOD_HEADERS, fetcher=None, check_exposed_paths=False)
+    result = score_on_page_seo(page, _GOOD_HEADERS, fetcher=None, check_exposed_paths=False)
 
     assert result.score <= 100.0
 
@@ -169,7 +169,7 @@ def test_score_never_exceeds_100():
 def test_multiple_h1_tags_flagged_medium():
     page = _make_page(h1_count=3)
 
-    result = score_technical_seo(page, {}, fetcher=None, check_exposed_paths=False)
+    result = score_on_page_seo(page, {}, fetcher=None, check_exposed_paths=False)
 
     assert any(
         f.title == "Multiple H1 tags (3)" and f.severity.value == "medium" for f in result.findings

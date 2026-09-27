@@ -10,8 +10,8 @@ from seo_geo_aeo.modules.geo_citability import score_citability
 from seo_geo_aeo.modules.geo_crawlers import analyze_crawler_access
 from seo_geo_aeo.modules.geo_schema import score_schema
 from seo_geo_aeo.modules.platform_optimization import score_platform_optimization
-from seo_geo_aeo.modules.seo_technical import score_technical_seo
-from seo_geo_aeo.modules.technical_seo import score_technical_seo as score_technical_seo_dimension
+from seo_geo_aeo.modules.seo_technical import score_on_page_seo
+from seo_geo_aeo.modules.technical_seo import score_technical_seo
 
 __all__ = [
     "analyze_crawler_access",
@@ -20,8 +20,8 @@ __all__ = [
     "score_citability",
     "score_content_quality",
     "score_eeat",
+    "score_on_page_seo",
     "score_platform_optimization",
     "score_schema",
     "score_technical_seo",
-    "score_technical_seo_dimension",
 ]

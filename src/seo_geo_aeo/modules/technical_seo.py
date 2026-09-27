@@ -1,6 +1,18 @@
 """
-Technical SEO scoring module.
+Technical SEO scoring module (dimension: "technical_seo").
 Covers crawlability, indexability, site architecture, and technical performance factors.
+
+Not measured here (RoadMap.md Phase 3.3): Google Search Console coverage,
+actual index status, crawl budget, Core Web Vitals from real users, JS
+execution performance unless rendered, search rankings, backlinks, or XML
+sitemap submission status — all require external tools/APIs this module
+doesn't have access to.
+
+Distinct from `modules.seo_technical.score_on_page_seo()` (dimension:
+"on_page"), which covers title/meta/heading/canonical/security-header
+signals. The near-identical file names are historical (RoadMap.md Phase
+3.2) — kept as-is rather than renamed again, since both dimension names
+are already load-bearing in PROFILE_WEIGHTS and reports.
 """
 from __future__ import annotations
 

@@ -24,7 +24,7 @@ from seo_geo_aeo.modules.geo_citability import score_citability
 from seo_geo_aeo.modules.geo_crawlers import analyze_crawler_access
 from seo_geo_aeo.modules.geo_schema import score_schema
 from seo_geo_aeo.modules.platform_optimization import score_platform_optimization
-from seo_geo_aeo.modules.seo_technical import score_technical_seo as score_on_page_factors
+from seo_geo_aeo.modules.seo_technical import score_on_page_seo
 from seo_geo_aeo.modules.technical_seo import score_technical_seo
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def _score_page_dimensions(
         scores["technical_seo"] = score_technical_seo(page, fetcher=fetcher)
 
     if "on_page" in wanted:
-        scores["on_page"] = score_on_page_factors(page, fetch_headers or {}, fetcher=fetcher)
+        scores["on_page"] = score_on_page_seo(page, fetch_headers or {}, fetcher=fetcher)
 
     if "content_quality" in wanted:
         scores["content_quality"] = score_content_quality(page, page_type_hint=page_type_hint)
