@@ -9,6 +9,7 @@ Usage:
     seo-geo-aeo report https://example.com --pdf full-report.pdf
     seo-geo-aeo compare example.com
     seo-geo-aeo prospects --status lead
+    seo-geo-aeo db-migrate
 """
 
 from __future__ import annotations
@@ -16,13 +17,19 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 from seo_geo_aeo.core.fetcher import FetchError, SafeFetcher, UnsafeURLError
 from seo_geo_aeo.core.orchestrator import run_audit, run_profiles, run_site_audit
 from seo_geo_aeo.core.scoring import CompositeResult
 from seo_geo_aeo.reporting.markdown_report import render_markdown_report
-from seo_geo_aeo.storage.supabase_client import AuditStore, ProspectRecord, SupabaseConfigError
+from seo_geo_aeo.storage.postgres_store import (
+    AuditStore,
+    StoreError,
+    apply_migrations,
+    get_conninfo,
+)
 
 
 def _domain_from_url(url: str) -> str:
@@ -91,17 +98,18 @@ def cmd_audit(args: argparse.Namespace) -> int:
     if args.save:
         try:
             store = AuditStore()
-        except SupabaseConfigError as exc:
+            prospect_id = None
+            if args.prospect:
+                # ensure_prospect, not upsert: auditing an existing 'won'/'proposal'
+                # prospect must not reset its status back to 'lead'.
+                prospect_id = store.ensure_prospect(domain)["id"]
+            store.save_audit(
+                domain=domain, profile=args.profile, result=result, prospect_id=prospect_id
+            )
+        except StoreError as exc:
             print(f"Warning: --save requested but not saved: {exc}", file=sys.stderr)
             return 1
-        prospect_id = None
-        if args.prospect:
-            prospect = store.upsert_prospect(
-                ProspectRecord(id=None, domain=domain, status="lead", company=None)
-            )
-            prospect_id = prospect["id"]
-        store.save_audit(domain=domain, profile=args.profile, result=result, prospect_id=prospect_id)
-        print(f"Saved audit for {domain} to Supabase.")
+        print(f"Saved audit for {domain} to the database.")
 
     return 0
 
@@ -176,11 +184,11 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_compare(args: argparse.Namespace) -> int:
     try:
         store = AuditStore()
-    except SupabaseConfigError as exc:
+        audits = store.latest_audits_for_domain(args.domain, limit=2)
+    except StoreError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    audits = store.latest_audits_for_domain(args.domain, limit=2)
     if len(audits) < 2:
         print(f"Need at least 2 saved audits for {args.domain} to compare; found {len(audits)}.")
         return 1
@@ -197,6 +205,10 @@ def cmd_compare(args: argparse.Namespace) -> int:
         prev_dim = previous["dimension_scores"].get(dim)
         if prev_dim is None:
             continue
+        # An unmeasured dimension stores score 0 as a placeholder; diffing it
+        # against a real score would report a fake regression.
+        if not latest_dim.get("measured", True) or not prev_dim.get("measured", True):
+            continue
         d = latest_dim["score"] - prev_dim["score"]
         if abs(d) >= 0.1:
             arrow = "▲" if d > 0 else "▼"
@@ -208,11 +220,11 @@ def cmd_compare(args: argparse.Namespace) -> int:
 def cmd_prospects(args: argparse.Namespace) -> int:
     try:
         store = AuditStore()
-    except SupabaseConfigError as exc:
+        prospects = store.list_prospects(status=args.status)
+    except StoreError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    prospects = store.list_prospects(status=args.status)
     if not prospects:
         print("No prospects found.")
         return 0
@@ -220,6 +232,20 @@ def cmd_prospects(args: argparse.Namespace) -> int:
     for p in prospects:
         value = f" (${p['monthly_value']}/mo)" if p.get("monthly_value") else ""
         print(f"{p['domain']:<40} {p['status']:<12}{value}")
+    return 0
+
+
+def cmd_db_migrate(args: argparse.Namespace) -> int:
+    migrations_dir = Path(args.dir)
+    try:
+        applied = apply_migrations(get_conninfo(), migrations_dir)
+    except StoreError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if applied:
+        print(f"Applied {len(applied)} migration(s): {', '.join(applied)}")
+    else:
+        print("Database is already up to date.")
     return 0
 
 
@@ -271,10 +297,10 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--domain", help="Domain label for storage (defaults to URL's netloc)")
     audit_parser.add_argument("--output", "-o", help="Write markdown report to this file instead of stdout")
     audit_parser.add_argument("--pdf", help="Also write a PDF report to this path")
-    audit_parser.add_argument("--save", action="store_true", help="Persist this audit to Supabase")
+    audit_parser.add_argument("--save", action="store_true", help="Persist this audit to PostgreSQL (needs DATABASE_URL)")
     audit_parser.add_argument(
         "--prospect", action="store_true",
-        help="Also create/update a prospect row for this domain (requires --save)",
+        help="Also create a prospect row for this domain if absent (requires --save)",
     )
     audit_parser.set_defaults(func=cmd_audit)
 
@@ -312,6 +338,14 @@ def build_parser() -> argparse.ArgumentParser:
     prospects_parser = subparsers.add_parser("prospects", help="List tracked prospects")
     prospects_parser.add_argument("--status", choices=["lead", "qualified", "proposal", "won", "lost"])
     prospects_parser.set_defaults(func=cmd_prospects)
+
+    migrate_parser = subparsers.add_parser(
+        "db-migrate", help="Apply pending SQL migrations to the database in DATABASE_URL"
+    )
+    migrate_parser.add_argument(
+        "--dir", default="migrations", help="Directory of *.sql migrations (default: ./migrations)"
+    )
+    migrate_parser.set_defaults(func=cmd_db_migrate)
 
     return parser
 
