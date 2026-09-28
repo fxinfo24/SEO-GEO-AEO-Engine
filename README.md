@@ -3,7 +3,7 @@
 A deterministic Python engine that audits a URL (or a crawled site) for visibility across
 traditional search (**SEO**), AI answer engines (**GEO** — Generative Engine Optimization),
 and answer/voice assistants (**AEO**). One fetch, one parse, scoring dimensions per
-profile, markdown + PDF output, optional Supabase-backed history.
+profile, markdown + PDF output, optional PostgreSQL-backed history (Neon, Supabase, or any Postgres).
 
 Repo: https://github.com/fxinfo24/SEO-GEO-AEO-Engine
 
@@ -27,22 +27,27 @@ claims, not just things found on live sites.
   key, external call failed) is excluded from the composite score entirely, rather than
   contributing a placeholder number that looks like a real measurement
 
-**What has never been run successfully, not even once:**
+**Verified against a real database:**
 
-- `--save`, `compare`, and `prospects`. The Supabase project exists and the schema is
-  migrated, but no service-role key has ever been supplied, so **every line of
-  `storage/supabase_client.py` is untested against a real database.** It compiles. That
-  is all anyone can currently claim about it.
+- Storage is plain PostgreSQL via `psycopg` and `DATABASE_URL` — Neon, Supabase, or any
+  Postgres. `storage/postgres_store.py` has 100% line coverage from integration tests
+  that run against a real PostgreSQL 16 (local Docker; a `postgres:16` service container
+  in CI). They cover migrations (idempotent, all-or-nothing), atomic audit-plus-findings
+  writes, CHECK constraints, the `updated_at` trigger, JSONB round-trips, and
+  SQL-injection-hostile finding text. The atomicity test was mutation-checked: it fails
+  if the transaction boundary is removed. `db-migrate`, `--save`, `compare`, and
+  `prospects` are exercised end to end through the CLI.
+- **Not verified:** a hosted Neon instance. The code is provider-neutral and passes on
+  Postgres 16, but nobody has run it against Neon's pooler or scale-to-zero behaviour.
 
 **What exists but is thin:**
 
-- **39 tests, 33% line coverage.** Real, and a real improvement from zero — but most of
-  that coverage sits in a handful of modules (`geo_citability` 93%, `technical_seo` 91%,
-  `scoring` 82%, `content_quality` 69%). `cli.py`, `render_fetcher.py`, `pdf_report.py`,
-  `storage/`, `eeat.py`, `geo_schema.py`, `brand_authority.py`,
-  `platform_optimization.py`, and `seo_technical.py` have **zero** automated test
-  coverage. Every "verified" claim about those still means "manually run against a live
-  site during development," not "covered by a test you can re-run."
+- **145 tests, 79% line coverage.** Weakest remaining: `crawler.py` 25%,
+  `render_fetcher.py` 38% (the SSRF route-decision logic is tested; a real Chromium
+  session is not), `ai_citation_likelihood.py` 48%, `pdf_report.py` 48%,
+  `orchestrator.py` 66% (the site-audit path is untested), `content_quality.py` 70%.
+  There are no fixture pages for the 11 page types `RoadMap.md` Phase 0.2 specifies, and
+  mypy is not yet enforced in CI.
 
 ---
 
@@ -53,7 +58,7 @@ from this tool. It was also the thing most wrong about this file until this pass
 earlier version of this README claimed AEO was 85% covered and SEO was 40% covered.
 Both numbers were correct when written and **stale by the time you'd have read them**,
 because a separate work session had already added `technical_seo.py`, `content_quality.py`,
-and `live_citation.py` without the README being updated to match. That gap — code moving
+and `live_citation.py` (since renamed `ai_citation_likelihood`) without the README being updated to match. That gap — code moving
 faster than its own documentation — is exactly the kind of thing this section exists to
 prevent from happening silently again.
 
@@ -83,12 +88,12 @@ for p in ('seo','aeo','geo'):
 ```
 
 **Coverage being 100% is not the same as quality being uniform.** Read the next section —
-one dimension in particular (`live_citation`) is real, wired in, and still something you
+one dimension in particular (`ai_citation_likelihood`) is real, wired in, and still something you
 should not treat as authoritative.
 
-## `live_citation`: read this before trusting the number
+## `ai_citation_likelihood`: read this before trusting the number
 
-Despite the name, this dimension does **not** test whether ChatGPT, Perplexity, or any
+Renamed from `live_citation` because that name implied a live check. This dimension does **not** test whether ChatGPT, Perplexity, or any
 other AI system has actually cited the page. It sends page content to an LLM (via
 OpenRouter, currently a specific free model) and asks it to *guess* a 0-100
 citation-likelihood score. That's a model opinion about the page, not an observation of
@@ -166,7 +171,7 @@ GEO profile weights shown; SEO and AEO have their own weight tables in
 | Schema | JSON-LD coverage, Organization/Person entity graph, deprecated types | 10% |
 | Platform Optimization | Per-platform readiness for Google AIO, ChatGPT, Perplexity, Gemini, Bing Copilot | 10% |
 
-AEO additionally weighs `live_citation` (15%, see caveats above) and drops
+AEO additionally weighs `ai_citation_likelihood` (15%, see caveats above) and drops
 `platform_optimization`. SEO uses `technical_seo`, `on_page`, `content_quality`, and
 `schema` — the first and third are the modules added in the Sep 20 session and are
 **not yet covered by the bug-hunting pass this README documents beyond the two fixes
@@ -178,15 +183,24 @@ listed above.** Assume they have not been fully audited.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 playwright install chromium        # only if you need --render
-cp .env.example .env               # only if you want --save/compare/prospects, or live_citation
+cp .env.example .env               # DATABASE_URL for --save/compare/prospects; OPENROUTER_API_KEY for ai_citation_likelihood
+seo-geo-aeo db-migrate             # once per database: applies ./migrations
 ```
 
-Python 3.12 is what this is developed and run on. **3.14 does not work** — `pydantic-core`
-(a Supabase dependency) has no 3.14 wheel and falls back to a Rust source build that
-hangs indefinitely. This cost an hour to diagnose; use 3.12. CI is pinned to 3.12 for
-the same reason.
+Python 3.12 is what this is developed and tested on. **3.14 is untested**: it previously
+failed because `pydantic-core` (pulled in by the since-removed Supabase client) had no
+3.14 wheel and fell back to a Rust source build that hung. That dependency is gone, but
+nobody has re-tried 3.14, so use 3.12. CI is pinned to 3.12.
 
 Run the tests: `pytest -v --cov=seo_geo_aeo --cov-report=term-missing`
+
+The storage tests need a throwaway PostgreSQL and skip without one:
+
+```bash
+docker run -d --name pg-test -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:16-alpine
+export TEST_DATABASE_URL=postgresql://postgres:test@localhost:55432/postgres
+pytest            # each test gets its own schema and drops it afterwards
+```
 
 ## Usage
 
@@ -211,7 +225,7 @@ seo-geo-aeo report https://example.com --render --timeout 60 \
   --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
   --pdf report.pdf
 
-# Supabase-backed — code path has never successfully executed, see above
+# PostgreSQL-backed (set DATABASE_URL; run `seo-geo-aeo db-migrate` once first)
 seo-geo-aeo audit https://example.com --save --prospect
 seo-geo-aeo compare example.com
 seo-geo-aeo prospects --status lead
@@ -263,7 +277,7 @@ number:
   site with three dead social links and zero mentions scores identically to one with an
   active community, as long as the URLs return 200.
 - **Follower/subscriber counts**
-- **Genuine live AI citation testing** — see the `live_citation` section above
+- **Genuine live AI citation testing** — see the `ai_citation_likelihood` section above
 - **Real client-side render performance** — only server response time is captured
 - **IndexNow / Bing WMT / Knowledge Panel / Google Business Profile status**
 
@@ -276,7 +290,7 @@ here. What remains is a proxy built from on-page signals and declared social pre
 Honestly: it's narrower, it's free, it's yours, and it shows its work.
 
 - **Deterministic.** Same page, same score, twice. No LLM re-deriving a rubric per run
-  for the six original dimensions — `live_citation` is the one exception, and it's
+  for the six original dimensions — `ai_citation_likelihood` is the one exception, and it's
   labeled as such.
 - **One data model across three profiles**, so a fix's effect on all three is visible at
   once — rather than three subscriptions with three incompatible scales.
@@ -285,10 +299,11 @@ Honestly: it's narrower, it's free, it's yours, and it shows its work.
   in this space either charge for the missing data or quietly paper over its absence —
   and, presumably, don't publish their own bug list.
 - **SSRF-guarded by default.** Every fetch resolves DNS and rejects loopback, private,
-  link-local, and reserved ranges before connecting; re-validates after redirects; and
+  link-local, and reserved ranges before connecting; validates every redirect hop
+  *before* following it (an unsafe redirect target is never requested); and
   applies the identical check to every sub-resource a rendered page requests. None of the
   53 source skills had any SSRF protection whatsoever.
-- **Self-hosted.** Your Python, your Supabase project, no per-audit metering.
+- **Self-hosted.** Your Python, your Postgres database, no per-audit metering.
 
 What commercial tools have that this doesn't: rank tracking, backlink indexes, real
 citation monitoring, mature test coverage, and a support contract.
@@ -299,36 +314,35 @@ citation monitoring, mature test coverage, and a support contract.
 src/seo_geo_aeo/
 ├── core/
 │   ├── fetcher.py         # SSRF-guarded, robots.txt-aware HTTP fetcher
-│   ├── render_fetcher.py  # Headless Chromium; same SSRF guard per sub-request (0% test coverage)
+│   ├── render_fetcher.py  # Headless Chromium; same SSRF guard per sub-request (38% coverage)
 │   ├── crawler.py         # Same-origin BFS crawl, page-budgeted (25% coverage)
-│   ├── parser.py          # HTML → structured page data + JSON-LD extraction (30% coverage)
-│   ├── scoring.py         # Weighted composite scorer, measured/unmeasured, aggregation (82% coverage)
-│   └── orchestrator.py    # fetch → parse → modules → composite (23% coverage)
-├── modules/                # 9 scoring modules; coverage ranges 0%-93%, see Install
-├── reporting/               # markdown_report, pdf_report (0% coverage)
-└── storage/                 # supabase_client — compiles, never executed live, 0% coverage
+│   ├── parser.py          # HTML → structured page data + JSON-LD extraction (86% coverage)
+│   ├── scoring.py         # Weighted composite scorer, measured/unmeasured, aggregation (98% coverage)
+│   └── orchestrator.py    # fetch → parse → modules → composite (66% coverage)
+├── modules/                # 9 scoring modules; 48%-100% coverage
+├── reporting/               # markdown_report (76%), pdf_report (48%)
+└── storage/                 # postgres_store — psycopg, atomic writes, migrations runner (100% coverage)
+migrations/                  # plain-SQL schema, applied by `db-migrate`
 ```
 
 ## Status
 
-v0.4. All three profiles now measure 100% of what they declare; a test suite and CI now
-exist; four real scoring bugs were found and fixed while getting here. Still true: no
-live Supabase run, thin test coverage outside a handful of modules, and `RoadMap.md` in
-this repo has a longer list of architectural work (shared-fetch refactor across
-profiles, Postgres/Neon evaluation, security hardening depth, full per-module fixture
-suite) that this pass did not attempt — it's a multi-session plan, not a checklist one
-pass clears.
+v0.6. Storage moved from the Supabase client to plain PostgreSQL and is integration-tested
+against a real database; redirect hops are validated before being followed; `report`
+fetches a page once for all profiles; the `on_page`/`technical_seo` naming collision and
+the misleading `live_citation` name are resolved. `RoadMap.md` tracks what remains — it is
+a multi-session plan, not a checklist one pass clears.
 
 Next, in the order that would matter most:
 
-1. **Run the Supabase path once** with a real key and find out what breaks.
-2. **Extend test coverage** to the zero-coverage modules listed above, starting with
-   `orchestrator.py` and `crawler.py` since they're the load-bearing glue.
-3. **Audit `technical_seo.py` and `content_quality.py`** as thoroughly as this pass
-   audited the rest — they're new, coverage on them is real but partial, and this pass
-   only caught the two bugs it happened to hit, not necessarily all of them.
-4. Share one fetch across profiles in `report` instead of re-fetching per profile.
-5. Decide whether `live_citation`'s LLM-guess approach is worth keeping, replacing with a
-   real citation test, or removing.
+1. **Run it once against a hosted Neon database** (pooled connection string) and find out
+   what a real provider does that a local container doesn't.
+2. **Enforce mypy in CI** and clear the existing type errors.
+3. **Fixture pages for the 11 page types** (`RoadMap.md` Phase 0.2) and `orchestrator`/
+   `crawler` tests for the site-audit path.
+4. **Share crawled pages across profiles** for `report --pages N` (single-page reports
+   already share one fetch; multi-page crawls still crawl once per profile).
+5. Decide whether `ai_citation_likelihood`'s LLM-guess approach is worth keeping,
+   replacing with a real citation test, or removing.
 
 MIT-licensed dependencies; the source skills were Apache-2.0 and MIT.

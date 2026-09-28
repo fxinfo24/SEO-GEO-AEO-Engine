@@ -9,12 +9,33 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # Real PostgreSQL for tests/storage — no mocks, no external account.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # Fail (don't skip) if the database is ever unreachable, so a broken
+      # service container can't turn the storage suite into a silent no-op.
+      REQUIRE_DB_TESTS: "1"
+
     steps:
       - uses: actions/checkout@v4
 
-      # Python 3.12, not 3.14: pydantic-core (a Supabase dependency) has no
-      # 3.14 wheel yet and falls back to a Rust source build that hangs.
-      # See README "Install" section — this cost real debugging time once.
+      # Python 3.12: the version this project is developed and tested on.
+      # 3.14 was broken by a since-removed dependency (pydantic-core via
+      # supabase) and has not been re-tested — see README "Install".
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
