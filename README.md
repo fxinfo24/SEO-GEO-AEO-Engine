@@ -42,12 +42,12 @@ claims, not just things found on live sites.
 
 **What exists but is thin:**
 
-- **145 tests, 79% line coverage.** Weakest remaining: `crawler.py` 25%,
+- **150 tests, 79% line coverage.** CI runs ruff, mypy, pytest (against a real Postgres), and a
+  gitleaks scan of full history — all blocking. Weakest remaining: `crawler.py` 25%,
   `render_fetcher.py` 38% (the SSRF route-decision logic is tested; a real Chromium
   session is not), `ai_citation_likelihood.py` 48%, `pdf_report.py` 48%,
   `orchestrator.py` 66% (the site-audit path is untested), `content_quality.py` 70%.
-  There are no fixture pages for the 11 page types `RoadMap.md` Phase 0.2 specifies, and
-  mypy is not yet enforced in CI.
+  There are no fixture pages for the 11 page types `RoadMap.md` Phase 0.2 specifies.
 
 ---
 
@@ -337,11 +337,12 @@ Next, in the order that would matter most:
 
 1. **Run it once against a hosted Neon database** (pooled connection string) and find out
    what a real provider does that a local container doesn't.
-2. **Enforce mypy in CI** and clear the existing type errors.
-3. **Fixture pages for the 11 page types** (`RoadMap.md` Phase 0.2) and `orchestrator`/
+2. **Fixture pages for the 11 page types** (`RoadMap.md` Phase 0.2) and `orchestrator`/
    `crawler` tests for the site-audit path.
-4. **Share crawled pages across profiles** for `report --pages N` (single-page reports
+3. **Share crawled pages across profiles** for `report --pages N` (single-page reports
    already share one fetch; multi-page crawls still crawl once per profile).
+4. **Fetch limits** (`RoadMap.md` Phase 10): maximum response size and a total audit
+   timeout are not enforced yet; redirect count (10) and per-request timeout are.
 5. Decide whether `ai_citation_likelihood`'s LLM-guess approach is worth keeping,
    replacing with a real citation test, or removing.
 

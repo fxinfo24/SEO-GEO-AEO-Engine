@@ -47,7 +47,22 @@ jobs:
 
       - name: Ruff (lint)
         run: ruff check src/ tests/
-        continue-on-error: true  # not clean yet; visible, not blocking
+
+      - name: Mypy (types)
+        run: mypy src
 
       - name: pytest
         run: pytest -v --cov=seo_geo_aeo --cov-report=term-missing
+
+  # Phase 10: secret scanning. Scans full history (fetch-depth: 0), not just the
+  # latest commit, since a leaked key stays leaked after a "remove secret" commit.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

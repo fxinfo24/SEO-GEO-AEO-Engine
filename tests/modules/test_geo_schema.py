@@ -8,27 +8,27 @@ from seo_geo_aeo.modules.geo_schema import score_schema
 
 
 def _make_page(**overrides) -> ParsedPage:
-    defaults = dict(
-        url="https://example.com",
-        title="Test",
-        meta_description=None,
-        canonical=None,
-        robots_meta=None,
-        h1_count=0,
-        headings=[],
-        word_count=10,
-        schema_blocks=[],
-        images_total=0,
-        images_missing_alt=0,
-        internal_links=[],
-        external_links=[],
-        open_graph={},
-        has_viewport_meta=False,
-        author_byline_present=False,
-        published_date=None,
-        modified_date=None,
-        raw_html="<html><body><p>Test</p></body></html>",
-    )
+    defaults = {
+        "url": "https://example.com",
+        "title": "Test",
+        "meta_description": None,
+        "canonical": None,
+        "robots_meta": None,
+        "h1_count": 0,
+        "headings": [],
+        "word_count": 10,
+        "schema_blocks": [],
+        "images_total": 0,
+        "images_missing_alt": 0,
+        "internal_links": [],
+        "external_links": [],
+        "open_graph": {},
+        "has_viewport_meta": False,
+        "author_byline_present": False,
+        "published_date": None,
+        "modified_date": None,
+        "raw_html": "<html><body><p>Test</p></body></html>",
+    }
     defaults.update(overrides)
     return ParsedPage(**defaults)
 
