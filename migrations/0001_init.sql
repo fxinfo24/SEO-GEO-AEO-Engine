@@ -1,5 +1,5 @@
--- SEO/GEO/AEO engine — initial schema
--- Run against your Supabase project (SQL editor or `supabase db push`).
+-- SEO/GEO/AEO engine — initial schema (plain PostgreSQL 13+; no provider-specific features).
+-- Applied by `seo-geo-aeo db-migrate`, which works against Neon, Supabase, or any Postgres.
 
 create table if not exists prospects (
     id uuid primary key default gen_random_uuid(),
@@ -53,10 +53,3 @@ drop trigger if exists trg_prospects_updated_at on prospects;
 create trigger trg_prospects_updated_at
     before update on prospects
     for each row execute function set_updated_at();
-
--- Row Level Security: service role (used by the engine's backend) bypasses RLS
--- by default in Supabase, so these policies matter once you add a client-facing
--- role. Enable and adjust before exposing this to anything but the service role.
-alter table prospects enable row level security;
-alter table audits enable row level security;
-alter table audit_findings enable row level security;
