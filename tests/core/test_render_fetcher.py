@@ -11,6 +11,8 @@ follow-up once `playwright install chromium` is part of the CI image.
 """
 from __future__ import annotations
 
+import pytest
+
 from seo_geo_aeo.core.render_fetcher import RenderFetcher
 
 
@@ -112,3 +114,14 @@ def test_validate_request_url_matches_safe_fetcher_directly():
     assert rf._validate_request_url("http://169.254.169.254/") is False
     assert rf._validate_request_url("ftp://example.com/") is False
     assert rf._validate_request_url("file:///etc/passwd") is False
+
+
+@pytest.mark.parametrize("value", ["load", "domcontentloaded", "networkidle", "commit"])
+def test_wait_until_accepts_playwright_values(value: str):
+    assert RenderFetcher(wait_until=value).wait_until == value
+
+
+def test_wait_until_rejects_unknown_value_at_construction():
+    """Fails fast with a clear message instead of deep inside Playwright."""
+    with pytest.raises(ValueError, match="wait_until"):
+        RenderFetcher(wait_until="whenever")

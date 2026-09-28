@@ -97,12 +97,26 @@ def _extract_headings(soup: BeautifulSoup) -> list[HeadingBlock]:
     return headings
 
 
+def _attr(tag: Tag, name: str) -> str | None:
+    """Attribute value as a plain str, or None.
+
+    BeautifulSoup types multi-valued attributes (class, rel, ...) as list[str];
+    join them so callers never have to handle the list case.
+    """
+    value = tag.get(name)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return " ".join(value)
+
+
 def _classify_links(soup: BeautifulSoup, base_url: str) -> tuple[list[str], list[str]]:
     base_host = urlparse(base_url).netloc
     internal: list[str] = []
     external: list[str] = []
     for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
+        href = (_attr(a, "href") or "").strip()
         if not href or href.startswith(("#", "mailto:", "tel:")):
             continue
         absolute = urljoin(base_url, href)
@@ -121,18 +135,21 @@ def parse_page(url: str, html: str) -> ParsedPage:
 
     meta_description = None
     md_tag = soup.find("meta", attrs={"name": re.compile(r"^description$", re.IGNORECASE)})
-    if md_tag and md_tag.get("content"):
-        meta_description = md_tag["content"].strip()
+    md_content = _attr(md_tag, "content") if isinstance(md_tag, Tag) else None
+    if md_content:
+        meta_description = md_content.strip()
 
     canonical = None
     canon_tag = soup.find("link", attrs={"rel": re.compile(r"^canonical$", re.IGNORECASE)})
-    if canon_tag and canon_tag.get("href"):
-        canonical = urljoin(url, canon_tag["href"])
+    canon_href = _attr(canon_tag, "href") if isinstance(canon_tag, Tag) else None
+    if canon_href:
+        canonical = urljoin(url, canon_href)
 
     robots_meta = None
     robots_tag = soup.find("meta", attrs={"name": re.compile(r"^robots$", re.IGNORECASE)})
-    if robots_tag and robots_tag.get("content"):
-        robots_meta = robots_tag["content"].strip()
+    robots_content = _attr(robots_tag, "content") if isinstance(robots_tag, Tag) else None
+    if robots_content:
+        robots_meta = robots_content.strip()
 
     h1_tags = soup.find_all("h1")
     headings = _extract_headings(soup)
@@ -143,21 +160,23 @@ def parse_page(url: str, html: str) -> ParsedPage:
     schema_blocks = _extract_schema_blocks(soup)
 
     images = soup.find_all("img")
-    images_missing_alt = sum(1 for img in images if not img.get("alt", "").strip())
+    images_missing_alt = sum(1 for img in images if not (_attr(img, "alt") or "").strip())
 
     internal_links, external_links = _classify_links(soup, url)
 
     open_graph: dict[str, str] = {}
     for tag in soup.find_all("meta", attrs={"property": re.compile(r"^og:", re.IGNORECASE)}):
-        if tag.get("content"):
-            open_graph[tag["property"]] = tag["content"]
+        og_property = _attr(tag, "property")
+        og_content = _attr(tag, "content")
+        if og_property and og_content:
+            open_graph[og_property] = og_content
 
     has_viewport = soup.find("meta", attrs={"name": re.compile(r"^viewport$", re.IGNORECASE)}) is not None
 
     author_byline_present = bool(
-        soup.find(attrs={"rel": re.compile(r"^author$", re.IGNORECASE)})
+        soup.find(None, attrs={"rel": re.compile(r"^author$", re.IGNORECASE)})
         or soup.find(class_=re.compile(r"author", re.IGNORECASE))
-        or soup.find(attrs={"itemprop": "author"})
+        or soup.find(None, attrs={"itemprop": "author"})
     )
 
     published_date = None
@@ -169,8 +188,9 @@ def parse_page(url: str, html: str) -> ParsedPage:
             modified_date = str(block["dateModified"])
     if published_date is None:
         pub_tag = soup.find("meta", attrs={"property": re.compile(r"article:published_time", re.IGNORECASE)})
-        if pub_tag and pub_tag.get("content"):
-            published_date = pub_tag["content"]
+        pub_content = _attr(pub_tag, "content") if isinstance(pub_tag, Tag) else None
+        if pub_content:
+            published_date = pub_content
 
     return ParsedPage(
         url=url,

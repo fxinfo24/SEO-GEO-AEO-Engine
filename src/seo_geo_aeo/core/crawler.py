@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from seo_geo_aeo.core.fetcher import FetchError, SafeFetcher, UnsafeURLError
+from seo_geo_aeo.core.fetcher import Fetcher, FetchError, SafeFetcher, UnsafeURLError
 from seo_geo_aeo.core.parser import ParsedPage, parse_page
 
 # Hard ceiling on frontier size so a page with thousands of internal links
@@ -20,7 +20,7 @@ class CrawlResult:
     skipped_offsite: int = 0
 
 
-def crawl_site(seed_url: str, *, fetcher: SafeFetcher | None = None, max_pages: int = 20) -> CrawlResult:
+def crawl_site(seed_url: str, *, fetcher: Fetcher | None = None, max_pages: int = 20) -> CrawlResult:
     """BFS-crawl same-origin HTML pages starting at `seed_url`, up to `max_pages`.
 
     Respects robots.txt via SafeFetcher (same as single-page audits) and the

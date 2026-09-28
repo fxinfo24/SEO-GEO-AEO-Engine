@@ -27,7 +27,7 @@ include).
 from __future__ import annotations
 
 import time
-from typing import Self
+from typing import TYPE_CHECKING, Literal, Self, cast
 
 from seo_geo_aeo.core.fetcher import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -37,6 +37,12 @@ from seo_geo_aeo.core.fetcher import (
     SafeFetcher,
     UnsafeURLError,
 )
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser, Playwright
+
+WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
+_VALID_WAIT_UNTIL = ("commit", "domcontentloaded", "load", "networkidle")
 
 
 class RenderFetcher:
@@ -59,10 +65,14 @@ class RenderFetcher:
         self.user_agent = user_agent
         self.timeout_seconds = timeout_seconds
         self.respect_robots = respect_robots
-        self.wait_until = wait_until
+        if wait_until not in _VALID_WAIT_UNTIL:
+            raise ValueError(
+                f"wait_until must be one of {_VALID_WAIT_UNTIL}, got {wait_until!r}"
+            )
+        self.wait_until: WaitUntil = cast(WaitUntil, wait_until)
         self._safe_fetcher = SafeFetcher(user_agent=user_agent, respect_robots=respect_robots)
-        self._playwright = None
-        self._browser = None
+        self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
 
     def __enter__(self) -> Self:
         return self

@@ -124,8 +124,8 @@ def _breakdown_table(result: CompositeResult) -> Table:
         rows.append([dim.replace("_", " ").title(), f"{ds.score}/100", f"{weight:.0%}", "Measured"])
     for dim in result.unmeasured_dimensions:
         declared_weight = result.declared_weights.get(dim, 0.0)
-        ds = result.dimension_scores.get(dim)
-        reason = ds.unmeasured_reason if ds and ds.unmeasured_reason else "not produced"
+        missing = result.dimension_scores.get(dim)
+        reason = missing.unmeasured_reason if missing and missing.unmeasured_reason else "not produced"
         rows.append(
             [dim.replace("_", " ").title(), "—", f"{declared_weight:.0%}", f"Not measured — {reason}"]
         )

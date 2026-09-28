@@ -13,6 +13,7 @@ import socket
 import time
 import urllib.robotparser
 from dataclasses import dataclass, field
+from typing import Protocol
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -38,6 +39,16 @@ class FetchResult:
     headers: dict[str, str]
     text: str
     elapsed_seconds: float
+
+
+class Fetcher(Protocol):
+    """The minimal fetch interface crawlers and orchestrators depend on.
+
+    Satisfied by both `SafeFetcher` (plain HTTP) and `RenderFetcher` (headless
+    Chromium), so a crawl can run over either without a cast.
+    """
+
+    def fetch(self, url: str, *, respect_robots_override: bool | None = None) -> FetchResult: ...
 
 
 @dataclass
