@@ -125,6 +125,7 @@ def run_audit(
             respect_robots=aux_fetcher.respect_robots,
             wait_until=render_wait_until,
             timeout_seconds=render_timeout_seconds,
+            deadline=aux_fetcher.deadline,
         ) as render_fetcher:
             fetch_result = render_fetcher.fetch(url)
     else:
@@ -197,6 +198,7 @@ def run_profiles(
             respect_robots=aux_fetcher.respect_robots,
             wait_until=render_wait_until,
             timeout_seconds=render_timeout_seconds,
+            deadline=aux_fetcher.deadline,
         ) as render_fetcher:
             fetch_result = render_fetcher.fetch(url)
     else:
@@ -261,6 +263,7 @@ def run_site_audit(
             respect_robots=aux_fetcher.respect_robots,
             wait_until=render_wait_until,
             timeout_seconds=render_timeout_seconds,
+            deadline=aux_fetcher.deadline,
         ) as render_fetcher:
             crawl_result = crawl_site(seed_url, fetcher=render_fetcher, max_pages=max_pages)
     else:

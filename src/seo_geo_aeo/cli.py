@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from seo_geo_aeo.core.fetcher import FetchError, SafeFetcher, UnsafeURLError
+from seo_geo_aeo.core.fetcher import Deadline, FetchError, SafeFetcher, UnsafeURLError
 from seo_geo_aeo.core.orchestrator import run_audit, run_profiles, run_site_audit
 from seo_geo_aeo.core.scoring import CompositeResult
 from seo_geo_aeo.reporting.markdown_report import render_markdown_report
@@ -36,8 +36,21 @@ def _domain_from_url(url: str) -> str:
     return urlparse(url).netloc or url
 
 
+def _build_fetcher(args: argparse.Namespace) -> SafeFetcher:
+    """A shared SafeFetcher for this invocation, carrying the total-audit
+    Deadline (RoadMap.md Phase 10). Always constructed (never None) so the
+    deadline is enforced even when --user-agent wasn't passed: orchestrator's
+    own `fetcher or SafeFetcher()` fallback would otherwise build a fresh,
+    un-timed fetcher and silently drop it. --audit-timeout 0 means unbounded.
+    """
+    deadline = Deadline(seconds=None if args.audit_timeout <= 0 else args.audit_timeout)
+    if args.user_agent:
+        return SafeFetcher(user_agent=args.user_agent, deadline=deadline)
+    return SafeFetcher(deadline=deadline)
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
-    fetcher = SafeFetcher(user_agent=args.user_agent) if args.user_agent else None
+    fetcher = _build_fetcher(args)
     crawl_meta = None
     try:
         if args.pages > 1:
@@ -116,7 +129,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     """Run multiple profiles against one URL and combine them into one PDF."""
-    fetcher = SafeFetcher(user_agent=args.user_agent) if args.user_agent else None
+    fetcher = _build_fetcher(args)
     profiles = [p.strip() for p in args.profiles.split(",") if p.strip()]
     domain = args.domain or _domain_from_url(args.url)
 
@@ -294,6 +307,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument(
         "--brand-name", help="Enables the Wikipedia/Wikidata check in brand_authority"
     )
+    audit_parser.add_argument(
+        "--audit-timeout", type=float, default=300.0,
+        help="Wall-clock seconds this whole audit (every fetch combined, not just one "
+        "request) may take before failing (RoadMap.md Phase 10). Default: 300. A --render "
+        "site crawl needs more headroom than the default single-page case; 0 disables it.",
+    )
     audit_parser.add_argument("--domain", help="Domain label for storage (defaults to URL's netloc)")
     audit_parser.add_argument("--output", "-o", help="Write markdown report to this file instead of stdout")
     audit_parser.add_argument("--pdf", help="Also write a PDF report to this path")
@@ -325,6 +344,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_parser.add_argument("--user-agent", help="See `audit --user-agent`")
     report_parser.add_argument("--brand-name", help="Enables the Wikipedia/Wikidata check")
+    report_parser.add_argument(
+        "--audit-timeout", type=float, default=600.0,
+        help="See `audit --audit-timeout`. Higher default here: up to 3 profiles' worth of "
+        "fetches share this one budget.",
+    )
     report_parser.add_argument("--domain", help="Domain label (defaults to URL's netloc)")
     report_parser.add_argument("--pdf", required=True, help="Path to write the combined PDF")
     report_parser.set_defaults(func=cmd_report)
