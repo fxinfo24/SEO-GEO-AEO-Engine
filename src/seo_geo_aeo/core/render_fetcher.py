@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Literal, Self, cast
 from seo_geo_aeo.core.fetcher import (
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_USER_AGENT,
+    Deadline,
     FetchError,
     FetchResult,
     SafeFetcher,
@@ -61,6 +62,7 @@ class RenderFetcher:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         respect_robots: bool = True,
         wait_until: str = "load",
+        deadline: Deadline | None = None,
     ) -> None:
         self.user_agent = user_agent
         self.timeout_seconds = timeout_seconds
@@ -70,6 +72,7 @@ class RenderFetcher:
                 f"wait_until must be one of {_VALID_WAIT_UNTIL}, got {wait_until!r}"
             )
         self.wait_until: WaitUntil = cast(WaitUntil, wait_until)
+        self.deadline = deadline
         self._safe_fetcher = SafeFetcher(user_agent=user_agent, respect_robots=respect_robots)
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
@@ -140,6 +143,9 @@ class RenderFetcher:
         Raises the same UnsafeURLError / FetchError types as SafeFetcher.fetch,
         so callers can handle both fetchers identically.
         """
+        if self.deadline is not None:
+            self.deadline.check(context="render fetch")
+
         # Initial validation — identical rules to the plain HTTP path.
         self._safe_fetcher.validate_url(url)
 
