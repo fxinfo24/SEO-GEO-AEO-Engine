@@ -42,7 +42,7 @@ claims, not just things found on live sites.
 
 **What exists but is thin:**
 
-- **150 tests, 79% line coverage.** CI runs ruff, mypy, pytest (against a real Postgres), and a
+- **186 tests, 80% line coverage.** CI runs ruff, mypy, pytest (against a real Postgres), and a
   gitleaks scan of full history — all blocking. Weakest remaining: `crawler.py` 25%,
   `render_fetcher.py` 38% (the SSRF route-decision logic is tested; a real Chromium
   session is not), `ai_citation_likelihood.py` 48%, `pdf_report.py` 48%,
@@ -298,11 +298,20 @@ Honestly: it's narrower, it's free, it's yours, and it shows its work.
   and the "bugs found and fixed" section above are the differentiator. Commercial tools
   in this space either charge for the missing data or quietly paper over its absence —
   and, presumably, don't publish their own bug list.
-- **SSRF-guarded by default.** Every fetch resolves DNS and rejects loopback, private,
-  link-local, and reserved ranges before connecting; validates every redirect hop
-  *before* following it (an unsafe redirect target is never requested); and
-  applies the identical check to every sub-resource a rendered page requests. None of the
-  53 source skills had any SSRF protection whatsoever.
+- **SSRF-guarded, with the DNS-rebinding TOCTOU closed.** Every hostname is resolved and
+  checked (deny-by-default: `not ip.is_global`, not an enumerated private/reserved/
+  loopback list — catches ranges like 100.64.0.0/10 carrier-grade NAT that enumerated
+  checks miss) before connecting; every redirect hop is validated *before* being
+  followed; and a custom `httpcore` network backend pins the exact resolved IP used for
+  validation to the exact IP the socket connects to, so a validation lookup and the
+  actual connection can never be two separate, independently-answerable DNS queries.
+  Applies identically to every sub-resource a rendered page requests. None of the 53
+  source skills had any SSRF protection whatsoever.
+- **Bounded by default.** A 20MB response-size cap (checked against a streamed byte
+  count, not just a trustable Content-Length header), a 10-hop redirect cap, and an
+  optional total-audit wall-clock budget (`--audit-timeout`, default 300s/600s) that
+  every fetch an audit makes — robots.txt, llms.txt, crawled pages, redirects — counts
+  against, not just one request.
 - **Self-hosted.** Your Python, your Postgres database, no per-audit metering.
 
 What commercial tools have that this doesn't: rank tracking, backlink indexes, real
@@ -338,12 +347,10 @@ Next, in the order that would matter most:
 1. **Run it once against a hosted Neon database** (pooled connection string) and find out
    what a real provider does that a local container doesn't.
 2. **Fixture pages for the 11 page types** (`RoadMap.md` Phase 0.2) and `orchestrator`/
-   `crawler` tests for the site-audit path.
+   `crawler` tests for the site-audit path (`crawler.py` is 25% covered).
 3. **Share crawled pages across profiles** for `report --pages N` (single-page reports
    already share one fetch; multi-page crawls still crawl once per profile).
-4. **Fetch limits** (`RoadMap.md` Phase 10): maximum response size and a total audit
-   timeout are not enforced yet; redirect count (10) and per-request timeout are.
-5. Decide whether `ai_citation_likelihood`'s LLM-guess approach is worth keeping,
+4. Decide whether `ai_citation_likelihood`'s LLM-guess approach is worth keeping,
    replacing with a real citation test, or removing.
 
 MIT-licensed dependencies; the source skills were Apache-2.0 and MIT.
