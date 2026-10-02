@@ -205,6 +205,23 @@ def _score_expertise_signals(page: ParsedPage, findings: list[Finding]) -> float
     return max(0.0, min(score, 1.0))
 
 
+def _parse_date(value: str | None) -> datetime | None:
+    """Parse an ISO date, forcing UTC when the string carries no offset.
+
+    WordPress emits naive strings like ``2025-09-07 21:38:15``, which
+    ``fromisoformat`` returns without tzinfo. Subtracting one of those from
+    ``datetime.now(UTC)`` raises TypeError, so normalise here — same guard
+    as ``eeat._parse_date``.
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 def _score_content_freshness(page: ParsedPage, findings: list[Finding]) -> float:
     """Score content freshness and relevance (0-1 scale)."""
     score = 0.7  # Baseline assumption
@@ -218,27 +235,15 @@ def _score_content_freshness(page: ParsedPage, findings: list[Finding]) -> float
     # Try to get dates from schema first
     for block in page.schema_blocks:
         if "datePublished" in block and not published:
-            try:
-                published = datetime.fromisoformat(block["datePublished"])
-            except ValueError:
-                pass
+            published = _parse_date(block["datePublished"])
         if "dateModified" in block and not modified:
-            try:
-                modified = datetime.fromisoformat(block["dateModified"])
-            except ValueError:
-                pass
+            modified = _parse_date(block["dateModified"])
 
     # Fallback to meta tags
-    if not published and page.published_date:
-        try:
-            published = datetime.fromisoformat(page.published_date)
-        except ValueError:
-            pass
-    if not modified and page.modified_date:
-        try:
-            modified = datetime.fromisoformat(page.modified_date)
-        except ValueError:
-            pass
+    if not published:
+        published = _parse_date(page.published_date)
+    if not modified:
+        modified = _parse_date(page.modified_date)
 
     # Score based on recency
     reference_date = modified or published

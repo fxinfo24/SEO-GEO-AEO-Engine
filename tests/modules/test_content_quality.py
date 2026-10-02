@@ -143,3 +143,69 @@ def test_no_first_person_language_produces_finding():
     assert any(
         f.title == "Limited first-person or experiential language" for f in result.findings
     ), "Expected the no-first-person finding to fire for entirely third-person content"
+
+
+def _dated_page(published: str | None, modified: str | None) -> ParsedPage:
+    """Minimal page carrying only the dates freshness scoring reads."""
+    heading = HeadingBlock(level=2, text="What is SEO?", following_text="Search optimization.")
+    return ParsedPage(
+        url="https://example.com",
+        title="SEO Overview",
+        meta_description=None,
+        canonical=None,
+        robots_meta=None,
+        h1_count=1,
+        headings=[heading],
+        word_count=60,
+        schema_blocks=[],
+        images_total=0,
+        images_missing_alt=0,
+        internal_links=[],
+        external_links=[],
+        open_graph={},
+        has_viewport_meta=False,
+        author_byline_present=False,
+        published_date=published,
+        modified_date=modified,
+        raw_html="<html><body><h2>What is SEO?</h2><p>Search optimization.</p></body></html>",
+    )
+
+
+def test_freshness_handles_naive_wordpress_dates():
+    """Regression: `now` is tz-aware but WordPress emits offset-free dates
+    like `2025-09-07 21:38:15`, so the subtraction raised
+    `TypeError: can't subtract offset-naive and offset-aware datetimes`.
+
+    Only reachable once a page carries a parseable date, which is why the
+    homepage-only run passed and the site-wide crawl crashed.
+    """
+    result = score_content_quality(_dated_page("2025-09-07 21:38:15", None))
+
+    assert result.dimension == "content_quality"
+    assert isinstance(result.score, float)
+
+
+def test_freshness_handles_aware_iso_dates():
+    """An already-offset date must stay usable, not be double-normalised."""
+    result = score_content_quality(_dated_page("2025-09-07T21:38:15Z", None))
+
+    assert result.dimension == "content_quality"
+    assert isinstance(result.score, float)
+
+
+def test_freshness_ignores_wordpress_zero_date():
+    """`0000-00-00 00:00:00` is not a real date; treat it as absent rather
+    than reading it as year 0 and reporting the content as millennia stale."""
+    result = score_content_quality(_dated_page("0000-00-00 00:00:00", None))
+
+    assert not any(
+        "outdated" in f.title.lower() for f in result.findings
+    ), "WordPress zero-date must not be scored as real staleness"
+
+
+def test_freshness_ignores_unparseable_dates():
+    """Malformed date strings degrade to 'no date', not an exception."""
+    result = score_content_quality(_dated_page("not-a-date", "also-not-a-date"))
+
+    assert result.dimension == "content_quality"
+    assert isinstance(result.score, float)
