@@ -281,6 +281,7 @@ def run_site_audit(
             _score_page_dimensions(
                 page,
                 profile,
+                fetch_headers=page.response_headers,
                 fetcher=aux_fetcher,
                 page_type_hint=page_type_hint,
                 brand_name=brand_name,

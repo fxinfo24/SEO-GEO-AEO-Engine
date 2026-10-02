@@ -58,7 +58,17 @@ def crawl_site(seed_url: str, *, fetcher: Fetcher | None = None, max_pages: int 
         if content_type and "text/html" not in content_type:
             continue
 
-        page = parse_page(result.final_url, result.text)
+        # SafeFetcher returns a FetchResult for non-2xx rather than raising,
+        # so a 404 the BFS reached (or a REST endpoint, or an author archive)
+        # would otherwise be parsed and scored as though it were content.
+        # Those produce findings like "No canonical tag" and "No structured
+        # data" that are true but meaningless -- they describe an error page,
+        # not the site's SEO. Skip them from scoring and report them.
+        if result.status_code >= 400:
+            failed[normalized] = f"HTTP {result.status_code}"
+            continue
+
+        page = parse_page(result.final_url, result.text, result.headers)
         pages.append(page)
 
         if len(visited) + len(queue) >= frontier_cap:

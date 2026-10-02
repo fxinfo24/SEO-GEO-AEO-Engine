@@ -43,6 +43,10 @@ class ParsedPage:
     published_date: str | None
     modified_date: str | None
     raw_html: str = field(repr=False)
+    # Response headers the origin actually sent. Header-derived checks
+    # (security headers, etc.) must read these rather than an empty dict —
+    # otherwise every crawled page is reported as missing them.
+    response_headers: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 def _text_or_none(tag: Tag | None) -> str | None:
@@ -127,8 +131,14 @@ def _classify_links(soup: BeautifulSoup, base_url: str) -> tuple[list[str], list
     return internal, external
 
 
-def parse_page(url: str, html: str) -> ParsedPage:
-    """Parse raw HTML for `url` into a ParsedPage used by all scoring modules."""
+def parse_page(url: str, html: str, response_headers: dict[str, str] | None = None) -> ParsedPage:
+    """Parse raw HTML for `url` into a ParsedPage used by all scoring modules.
+
+    `response_headers` are carried through onto the ParsedPage so downstream
+    header checks can see what the origin actually sent. Callers that omit it
+    (tests, ad-hoc parsing) get an empty dict, which those checks treat as
+    "unknown" rather than "server sent nothing".
+    """
     soup = BeautifulSoup(html, "html.parser")
 
     title = _text_or_none(soup.find("title"))
@@ -212,4 +222,5 @@ def parse_page(url: str, html: str) -> ParsedPage:
         published_date=published_date,
         modified_date=modified_date,
         raw_html=html,
+        response_headers=dict(response_headers or {}),
     )
