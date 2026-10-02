@@ -140,14 +140,29 @@ PROFILE_WEIGHTS: dict[str, dict[str, float]] = {
 def aggregate_dimension_scores(dimension: str, page_scores: list[DimensionScore]) -> DimensionScore:
     """Combine one dimension's per-page scores into a single site-level score.
 
-    Score is the mean across pages. Findings are deduplicated by title (a
-    "No H1 found" on 15 pages becomes one finding noting the count) and
-    capped so a large crawl doesn't produce an unreadable report.
+    Score is the mean across the pages that were actually measured. Findings
+    are deduplicated by title (a "No H1 found" on 15 pages becomes one
+    finding noting the count) and capped so a large crawl doesn't produce an
+    unreadable report.
+
+    A dimension is only `measured` when every page scored it. If any page
+    reported `measured=False` — an unreachable API, a missing key — that
+    page's placeholder zero is excluded from the mean rather than averaged
+    in as a real score, and the aggregate inherits `measured=False` so the
+    composite scorer drops the dimension instead of treating a failed check
+    as a genuine result.
     """
     if not page_scores:
         raise ValueError(f"Cannot aggregate zero page scores for dimension {dimension!r}")
 
-    mean_score = sum(ds.score for ds in page_scores) / len(page_scores)
+    measured_pages = [ds for ds in page_scores if ds.measured]
+    unmeasured_pages = [ds for ds in page_scores if not ds.measured]
+    all_measured = not unmeasured_pages
+
+    # With nothing measured there is no score to report; mean over the
+    # measured subset instead of over placeholder zeros.
+    score_basis = measured_pages or page_scores
+    mean_score = sum(ds.score for ds in score_basis) / len(score_basis)
 
     findings_by_title: dict[str, list[Finding]] = {}
     for ds in page_scores:
@@ -164,11 +179,24 @@ def aggregate_dimension_scores(dimension: str, page_scores: list[DimensionScore]
             Finding(severity=sample.severity, title=title, detail=detail, page_url=sample.page_url)
         )
 
+    unmeasured_reason = None
+    if not all_measured:
+        reasons = {ds.unmeasured_reason for ds in unmeasured_pages if ds.unmeasured_reason}
+        unmeasured_reason = "; ".join(sorted(reasons)) or (
+            f"{len(unmeasured_pages)} of {len(page_scores)} pages did not measure this dimension."
+        )
+
     return DimensionScore(
         dimension=dimension,
         score=round(mean_score, 1),
+        measured=all_measured,
+        unmeasured_reason=unmeasured_reason,
         findings=aggregated_findings,
-        raw={"pages_scored": len(page_scores), "per_page_scores": [ds.score for ds in page_scores]},
+        raw={
+            "pages_scored": len(page_scores),
+            "pages_measured": len(measured_pages),
+            "per_page_scores": [ds.score for ds in page_scores],
+        },
     )
 
 
