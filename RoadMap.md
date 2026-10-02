@@ -1213,6 +1213,47 @@ Deterministic local scoring
 
 That gives the project a reliable foundation without adding infrastructure before the product actually needs it.
 
+---
+
+# Implementation status
+
+The roadmap above describes the intended end state. This section records where the
+repository actually stands against it, verified against the tree rather than assumed.
+
+Most of the "Definition of done" list is met. CI runs pytest, Ruff, and mypy on Python
+3.12, plus secret scanning. Scores expose measured and unmeasured coverage, and both
+`markdown_report.py` and `pdf_report.py` render the "Measured coverage: X%" line rather
+than hiding unmeasured dimensions. The ambiguous `score_technical_seo` name collision is
+resolved at the source: `modules/seo_technical.py` exposes `score_on_page_seo()`, distinct
+from `modules/technical_seo.score_technical_seo()`, so no orchestrator alias is needed.
+The misleading `live_citation` dimension is now `ai_citation_likelihood`. Storage goes
+through a provider-neutral abstraction backed by psycopg, with migrations on disk and
+transactional writes; a real PostgreSQL integration test runs in CI against a disposable
+database. SSRF protections have automated tests, including redirect-to-private-IP
+rejection and the DNS-rebinding TOCTOU fix, and the fetcher enforces response-size caps
+and a total-audit timeout.
+
+Two gaps remain.
+
+**Phase 0.2 fixtures are not frozen.** The eleven representative page types the roadmap
+calls for — excellent and poor technical SEO, long-form, thin, JSON-LD organization, FAQ,
+broken canonical/robots, inaccessible social links, SPA-like empty shell, malformed HTML,
+and missing headings/metadata — do not exist as shared fixtures. Tests build `ParsedPage`
+objects inline instead. This is workable but leaves every module hand-rolling its own
+sample page, so the same edge case is expressed differently in a dozen places and no
+representative case can be shared across modules.
+
+**Reporting tests are thin.** `tests/reporting/` holds a single file,
+`test_coverage_display.py`, with four tests covering the coverage line. The PDF path in
+particular has no dedicated test, so layout regressions in `pdf_report.py` would not be
+caught by the suite.
+
+Both are additive work that does not disturb the scoring model, and both are cheaper than
+anything left in the scoring or fetching layers.
+
+---
+
+
 ## Previous Plan (For record):
 
 The roadmap is sound, but the repository is already partway through it. The current `main` branch contains `technical_seo`, `content_quality`, `live_citation`, and tests for those modules, so the next step should be to verify that these changes are actually integrated correctly rather than treating them as future work.
